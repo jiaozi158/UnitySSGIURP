@@ -11,9 +11,9 @@ Screenshots
  
 Available in the samples page:
  
- ![EnableSSGI](Documentation~/Images/Relaxing Corner/SSGI_FullRes_High.jpg)
+ ![EnableSSGI](Documentation~/Images/RelaxingCorner/SSGI_FullRes_High.jpg)
  
- ![DisableSSGI](Documentation~/Images/Relaxing Corner/SSGI_Disabled.jpg)
+ ![DisableSSGI](Documentation~/Images/RelaxingCorner/SSGI_Disabled.jpg)
  
 Installation
 ------------
