@@ -29,9 +29,11 @@ using UnityEngine.Rendering.Universal;
 #if UNITY_2023_1_OR_NEWER
 [VolumeComponentMenu("Lighting/Screen Space Global Illumination (URP)"), SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
 #else
-[VolumeComponentMenuForRenderPipeline("Lighting/Screen Space Reflection (URP)", typeof(UniversalRenderPipeline))]
+[VolumeComponentMenuForRenderPipeline("Lighting/Screen Space Global Illumination (URP)", typeof(UniversalRenderPipeline))]
 #endif
+#if UNITY_2023_3_OR_NEWER
 [VolumeRequiresRendererFeatures(typeof(ScreenSpaceGlobalIlluminationURP))]
+#endif
 [HelpURL("https://github.com/jiaozi158/UnitySSGIURP/blob/main/Documentation~/Documentation.md")]
 public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPostProcessComponent
 {
@@ -39,6 +41,11 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
     {
         displayName = "Screen Space Global Illumination";
     }
+
+#if !UNITY_2023_2_OR_NEWER
+    // This is unused since 2023.1
+    public bool IsTileCompatible() => false;
+#endif
 
     /// <summary>
     /// Enable screen space global illumination.
@@ -134,14 +141,21 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
     [AdditionalProperty, InspectorName("Indirect Diffuse Lighting Multiplier"), Tooltip("Controls the indirect diffuse lighting from screen space global illumination.")]
     public MinFloatParameter indirectDiffuseLightingMultiplier = new MinFloatParameter(1.0f, 0.0f);
 
+#if UNITY_2023_1_OR_NEWER
     /// <summary>
     /// Controls which rendering layer will be affected by screen space global illumination.
     /// </summary>
     [Header("Experimental"), AdditionalProperty, InspectorName("Indirect Diffuse Rendering Layers"), Tooltip("Controls which rendering layer will be affected by screen space global illumination.")]
     public RenderingLayerEnumParameter indirectDiffuseRenderingLayers = new RenderingLayerEnumParameter(0xFFFF);
+#endif
+
     public bool IsActive()
     {
+    #if UNITY_2023_1_OR_NEWER
         return enable.value && indirectDiffuseRenderingLayers.value.value != 0; // 0 -> RenderingLayerMask.Nothing
+    #else
+        return enable.value;
+    #endif
     }
 
     public enum DenoiserAlgorithm
@@ -264,6 +278,7 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
         public RayMarchingFallbackHierarchyParameter(RayMarchingFallbackHierarchy value, bool overrideState = false) : base(value, overrideState) { }
     }
 
+#if UNITY_2023_1_OR_NEWER
     /// <summary>
     /// A <see cref="VolumeParameter"/> that holds
     /// <see cref="RenderingLayerMask"/> value.
@@ -278,6 +293,7 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
         /// <param name="overrideState">The initial override state for the parameter.</param>
         public RenderingLayerEnumParameter(RenderingLayerMask value, bool overrideState = false) : base(value, overrideState) { }
     }
+#endif
 
     private void ApplyCurrentQualityMode()
     {

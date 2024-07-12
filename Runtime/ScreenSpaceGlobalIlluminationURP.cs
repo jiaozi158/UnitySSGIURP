@@ -311,6 +311,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         m_SSGIMaterial.SetFloat(_IndirectDiffuseLightingMultiplier, ssgiVolume.indirectDiffuseLightingMultiplier.value);
         m_SSGIMaterial.SetFloat(_MaxBrightness, 7.0f);
 
+    #if UNITY_2023_1_OR_NEWER
         bool enableRenderingLayers = Shader.IsKeywordEnabled(_LIGHT_LAYERS) && ssgiVolume.indirectDiffuseRenderingLayers.value.value != 0xFFFF;
         if (enableRenderingLayers)
         {
@@ -318,7 +319,11 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             m_SSGIMaterial.SetInteger(_IndirectDiffuseRenderingLayers, (int)ssgiVolume.indirectDiffuseRenderingLayers.value.value);
         }
         else
-            m_SSGIMaterial.DisableKeyword(_USE_RENDERING_LAYERS);
+        m_SSGIMaterial.DisableKeyword(_USE_RENDERING_LAYERS);
+    #else
+        bool enableRenderingLayers = false;
+        m_SSGIMaterial.DisableKeyword(_USE_RENDERING_LAYERS);
+    #endif
 
         m_SSGIPass.ssgiVolume = ssgiVolume;
         m_SSGIPass.enableRenderingLayers = enableRenderingLayers;
@@ -664,10 +669,10 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             }
 
             RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;
-            RenderTextureDescriptor depthDesc = desc;
             desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
             desc.stencilFormat = GraphicsFormat.None;
             desc.msaaSamples = 1;
+            RenderTextureDescriptor depthDesc = desc;
 
         #if UNITY_6000_0_OR_NEWER
             RenderingUtils.ReAllocateHandleIfNeeded(ref m_IntermediateCameraColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: _IntermediateCameraColorTexture);

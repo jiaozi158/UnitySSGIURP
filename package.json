@@ -1,9 +1,9 @@
 {
   "name": "com.jiaozi158.unityssgiurp",
   "displayName": "SSGI for Universal RP",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "unity": "2022.3",
-  "unityRelease": "0f1",
+  "unityRelease": "35f1",
   "description": "The Screen Space Global Illumination uses the depth and color buffer of the screen to calculate diffuse light bounces.",
   "documentationUrl": "https://github.com/jiaozi158/UnitySSGIURP/blob/main/Documentation~/Documentation.md",
   "license": "MIT",
@@ -16,7 +16,7 @@
     "graphics"
   ],
   "dependencies": {
-      "com.unity.render-pipelines.universal": "14.0.7"
+      "com.unity.render-pipelines.universal": "14.0.11"
   },
   "samples": [
     {

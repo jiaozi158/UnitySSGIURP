@@ -29,7 +29,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			// The Blit.hlsl file provides the vertex shader (Vert),
 			// input structure (Attributes) and output structure (Varyings)
 			#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
-			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DynamicScalingClamping.hlsl"
 
 			#pragma vertex Vert
 			#pragma fragment frag
@@ -570,7 +569,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			// The Blit.hlsl file provides the vertex shader (Vert),
 			// input structure (Attributes) and output structure (Varyings)
 			#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
-			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DynamicScalingClamping.hlsl"
 			
 			#pragma vertex Vert
 			#pragma fragment frag
@@ -589,7 +587,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 			half3 BilateralUpscale(float2 screenUV, float deviceDepth)
 			{
-				float2 offsetUV = ClampAndScaleUVForBilinear(screenUV);
+				float2 offsetUV = screenUV;
 				offsetUV.y -= _IndirectDiffuseTexture_TexelSize.y;
 
 				half3 centerNormal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyz;

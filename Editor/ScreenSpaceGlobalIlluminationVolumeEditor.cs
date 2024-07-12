@@ -35,7 +35,9 @@ class ExampleComponentEditor : VolumeComponentEditor
 
     // Indirect Lighting Controller (SSGI only)
     SerializedDataParameter m_IndirectDiffuseLightingMultiplier;
+#if UNITY_2023_1_OR_NEWER
     SerializedDataParameter m_IndirectDiffuseRenderingLayers;
+#endif
 
     const string k_PROBE_VOLUMES_L1 = "PROBE_VOLUMES_L1";
     const string k_PROBE_VOLUMES_L2 = "PROBE_VOLUMES_L2";
@@ -100,7 +102,9 @@ class ExampleComponentEditor : VolumeComponentEditor
         m_RayMiss = Unpack(o.Find(x => x.rayMiss));
 
         m_IndirectDiffuseLightingMultiplier = Unpack(o.Find(x => x.indirectDiffuseLightingMultiplier));
+    #if UNITY_2023_1_OR_NEWER
         m_IndirectDiffuseRenderingLayers = Unpack(o.Find(x => x.indirectDiffuseRenderingLayers));
+    #endif
         base.OnEnable();
     }
 
@@ -151,7 +155,7 @@ class ExampleComponentEditor : VolumeComponentEditor
         if (!isForwardPlus)
         {
             EditorGUILayout.Space();
-            EditorGUILayout.HelpBox(k_ProbeAtlasUnavailableMessage, MessageType.Info, wide: true);
+            EditorGUILayout.HelpBox(k_ProbeAtlasUnavailableMessage, MessageType.Warning, wide: true);
             EditorGUILayout.Space();
         }
 
@@ -221,6 +225,7 @@ class ExampleComponentEditor : VolumeComponentEditor
         PropertyField(m_RayMiss);
         PropertyField(m_IndirectDiffuseLightingMultiplier);
 
+    #if UNITY_2023_1_OR_NEWER
         if (m_IndirectDiffuseRenderingLayers.overrideState.boolValue && m_IndirectDiffuseRenderingLayers.value.intValue != -1)
         {
             if (!Shader.IsKeywordEnabled(k_LIGHT_LAYERS))
@@ -243,6 +248,7 @@ class ExampleComponentEditor : VolumeComponentEditor
             }
         }
         PropertyField(m_IndirectDiffuseRenderingLayers);
+    #endif
     }
     void LoadCurrentQualityMode(ScreenSpaceGlobalIlluminationVolume.QualityMode mode)
     {
