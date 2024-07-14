@@ -6,10 +6,10 @@
 #include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIConfig.hlsl"
 
 #define _DenoiserFilterRadius 0.6
-float ComputeMaxDenoisingRadius(float3 positionWS)
+half ComputeMaxDenoisingRadius(float3 positionWS)
 {
     // Compute the distance to the pixel
-    float distanceToPoint = length(positionWS);
+    float distanceToPoint = length(positionWS - GetCameraPositionWS());
     // This is purely empirical, values were obtained  while experimenting with various scenes and these values give good visual results.
     // The world space radius for sample picking goes from distance/10.0 to distance/50.0 linearly until reaching 500.0 meters away from the camera
     // and it is always 20.0f (or two pixels if subpixel.

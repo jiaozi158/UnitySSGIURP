@@ -20,8 +20,8 @@
 #define MAX_ACCUM_FRAME_NUM			8
 
 // Temporal re-projection rejection threshold
-#define MAX_REPROJECTION_DISTANCE	0.02
-#define MAX_PIXEL_TOLERANCE			20
+#define MAX_REPROJECTION_DISTANCE	0.1
+#define MAX_PIXEL_TOLERANCE			4
 #define PROJECTION_EPSILON			0.000001
 
 #define CLAMP_MAX       65472.0 // HALF_MAX minus one (2 - 2^-9) * 2^15

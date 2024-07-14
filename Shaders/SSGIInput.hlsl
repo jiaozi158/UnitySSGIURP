@@ -110,7 +110,7 @@ half4 ssgi_SHBb;
 half4 ssgi_SHC;
 
 half _DownSample;
-half _FrameIndex;
+float _FrameIndex;
 half _MaxMediumSteps;
 half _MaxSmallSteps;
 half _HistoryTextureValid;

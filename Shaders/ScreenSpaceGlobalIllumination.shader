@@ -16,6 +16,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 		// Pass 4: Temporal Stabilization
 		// Pass 5: Copy History Depth
 		// Pass 6: Combine & Upscale GI
+		// Pass 7: [Editor only] Camera Motion Vectors
 
 		Pass
 		{
@@ -35,6 +36,8 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 			#pragma target 3.5
 
+			#pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
+
 		#if UNITY_VERSION >= 202310
 			#pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
 		#endif
@@ -47,6 +50,11 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float2 screenUV = input.texcoord;
 
 				float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
+
+			#if !UNITY_REVERSED_Z
+                depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth);
+            #endif
+
 				half4 directLighting = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgba;
 
 				// If the current pixel is sky
@@ -60,6 +68,12 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				half4 gbuffer0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, screenUV, 0);
 				half3 albedo = gbuffer0.rgb;
 				half4 normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0);
+
+			#if defined(_GBUFFER_NORMALS_OCT)
+				half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normalSmoothness.xyz));                // values between [ 0, +1]
+				half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                        // values between [-1, +1]
+				normalSmoothness.xyz = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+			#endif 
 
 				half4 gbuffer1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, my_point_clamp_sampler, screenUV, 0);
 				half metallic = (gbuffer0.a == kMaterialFlagSpecularSetup) ? MetallicFromReflectivity(ReflectivitySpecular(gbuffer1.rgb)) : gbuffer1.r;
@@ -108,29 +122,29 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIDenoise.hlsl"
 			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
             
-            half4 frag(Varyings input) : SV_Target
-            {
-                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-                float2 screenUV = input.texcoord;
+			half4 frag(Varyings input) : SV_Target
+			{
+				UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+				float2 screenUV = input.texcoord;
 
 				half4 lightingDistance = half4(0.0, 0.0, 0.0, 1.0); // indirectDiffuse.rgb + distance.a
 
 				float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
 
-                // If the current pixel is sky
+				// If the current pixel is sky
 				bool isBackground = depth == UNITY_RAW_FAR_CLIP_VALUE ? true : false;
 
 				// Don't clear the render target, we use them to fill in the border gaps when rendering low resolution GI.
 				if (isBackground)
 					discard;
 
-            #if !UNITY_REVERSED_Z
-                depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth);
-            #endif
+			#if !UNITY_REVERSED_Z
+				depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth);
+			#endif
 
 				// Start denoising before tracing SSGI
 				// If the history sample for a pixel will be invalid, we sample the reflection probes multiple times and use the results instead.
-				
+
 				// TODO: find a way to calculate it only once. (SSGI pass & Temporal Reprojection pass)
 				float3 positionWS = ComputeWorldSpacePosition(screenUV, depth, UNITY_MATRIX_I_VP);
 				float3 cameraPositionWS = GetCameraPositionWS();
@@ -140,15 +154,26 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float2 prevUV = screenUV - velocity;
 
 				half4 normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyzw;
+
+			#if defined(_GBUFFER_NORMALS_OCT)
+				half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normalSmoothness.xyz));                // values between [ 0, +1]
+				half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                        // values between [-1, +1]
+				normalSmoothness.xyz = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+			#endif 
+
 				half maxRadius = ComputeMaxReprojectionWorldRadius(positionWS, viewDirectionWS, normalSmoothness.xyz, _PixelSpreadAngleTangent);
-				float prevDeviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, prevUV, 0).r;
+				float prevDeviceDepth = SAMPLE_TEXTURE2D_X_LOD(_SSGIHistoryDepthTexture, my_point_clamp_sampler, prevUV, 0).r;
+
+			#if !UNITY_REVERSED_Z
+				prevDeviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, prevDeviceDepth);
+			#endif
 
 				float3 prevPositionWS = ComputeWorldSpacePosition(prevUV, prevDeviceDepth, _PrevInvViewProjMatrix);
 				half radius = length(prevPositionWS - positionWS) / maxRadius;
 
 				// Is it too far from the current position?
 				bool traceProbes = (prevUV.x > 1.0 || prevUV.x < 0.0 || prevUV.y > 1.0 || prevUV.y < 0.0 || radius > 1.0 || !_HistoryTextureValid);
-				
+
 
 				Ray ray;
 				ray.position = cameraPositionWS;
@@ -158,16 +183,18 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				RayHit screenHit = InitializeRayHit();
 				screenHit.distance = length(cameraPositionWS - positionWS);
 				screenHit.position = positionWS;
-				screenHit.normal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyz;
+				screenHit.normal = normalSmoothness.xyz; //SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyz;
 
+				/*
 			#if defined(_GBUFFER_NORMALS_OCT)
 				half2 remappedOctNormalWS = half2(Unpack888ToFloat2(screenHit.normal));                // values between [ 0, +1]
 				half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                    // values between [-1, +1]
 				screenHit.normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
 			#endif
-				
+				*/
+
 				UNITY_BRANCH
-			    if (!traceProbes)
+				if (!traceProbes)
 				{
 					// Set the hit distance to 0
 					lightingDistance.a = 0.0;
@@ -182,7 +209,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 						// Generate a new sample direction
 						ray.direction = SampleHemisphereCosine(GenerateRandomValue(screenUV), GenerateRandomValue(screenUV), rayHit.normal);
 						ray.position = rayHit.position;
-						
+
 						// Find the intersection of the ray with scene geometries
 						rayHit = RayMarching(ray, dither, viewDirectionWS);
 
@@ -197,7 +224,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 						else
 						{
 							lightingDistance.rgb += SampleReflectionProbes(ray.direction, positionWS, 1.0h, screenUV) * rcp(RAY_COUNT);
-							lightingDistance.a = 1.0;
+							lightingDistance.a += 1.0 * rcp(RAY_COUNT);
 						}
 					}
 				}
@@ -217,8 +244,8 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				lightingDistance.z = clamp(lightingDistance.z, 0.0, _MaxBrightness);
 				lightingDistance.xyz = HsvToRgb(lightingDistance.xyz);
 
-                return lightingDistance;
-            }
+				return lightingDistance;
+			}
             ENDHLSL
         }
 		
@@ -250,10 +277,16 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float2 screenUV = input.texcoord;
 
 				half2 velocity = SAMPLE_TEXTURE2D_X_LOD(_MotionVectorTexture, sampler_LinearClamp, screenUV, 0).xy;
+
 				float2 prevUV = screenUV - velocity;
 
 				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
-				float prevDeviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, prevUV, 0).r;
+				float prevDeviceDepth = SAMPLE_TEXTURE2D_X_LOD(_SSGIHistoryDepthTexture, my_point_clamp_sampler, prevUV, 0).r;
+
+			#if !UNITY_REVERSED_Z
+				deviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, deviceDepth);
+				prevDeviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, prevDeviceDepth);
+			#endif
 
 				half4 normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyzw;
 
@@ -283,7 +316,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				half historySample = SAMPLE_TEXTURE2D_X_LOD(_SSGIHistorySampleTexture, my_point_clamp_sampler, prevUV, 0).r;
 
 				// Compute the max world radius that we consider acceptable for history reprojection
-				float linearDepth = Linear01Depth(deviceDepth, _ZBufferParams);
 				half maxRadius = ComputeMaxReprojectionWorldRadius(positionWS, viewDirWS, normalSmoothness.xyz, _PixelSpreadAngleTangent);
 				half radius = length(prevPositionWS - positionWS) / maxRadius;
 
@@ -310,7 +342,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				else
 				{
 					result = currentColor.rgb;
-					sampleCount = 8.0; // multiple samples from reflection probe, almost no noise
+					sampleCount = MAX_ACCUM_FRAME_NUM; // multiple samples from reflection probe, almost no noise
 				}
 
 				denoiseOutput = half4(result, currentColor.a);
@@ -353,6 +385,10 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float2 screenUV = input.texcoord;
 
 				float centerDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
+
+			#if !UNITY_REVERSED_Z
+				centerDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, centerDepth);
+            #endif
 
 				// If the current pixel is sky
 				bool isBackground = centerDepth == UNITY_RAW_FAR_CLIP_VALUE ? true : false;
@@ -424,7 +460,13 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 					half distance = max(dot(diff, diff), 0.0);
 					half normalWeight = min(exp(-distance * 20.0), 1.0);
 
-					float depth = LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv, 0).r, _ZBufferParams);
+					float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv, 0).r;
+
+				#if !UNITY_REVERSED_Z
+					depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth);
+				#endif
+
+					depth = LinearEyeDepth(depth, _ZBufferParams);
 
 					diff.x = centerDepth - depth;
 					distance = dot(diff.x, diff.x);
@@ -475,6 +517,11 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float2 prevUV = screenUV - velocity;
 
 				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
+
+			#if !UNITY_REVERSED_Z
+				deviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, deviceDepth);
+			#endif
+
 				bool isSky = deviceDepth == UNITY_RAW_FAR_CLIP_VALUE ? true : false;;
 
 				if (isSky || prevUV.x > 1.0 || prevUV.x < 0.0 || prevUV.y > 1.0 || prevUV.y < 0.0)
@@ -524,6 +571,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			Tags { "LightMode" = "Screen Space Global Illumination" }
 
             Blend One Zero
+			ZWrite On
 			
 			HLSLPROGRAM
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -544,12 +592,14 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
             TEXTURE2D_X(_CameraDepthTexture);
 			SAMPLER(my_point_clamp_sampler);
             
-            float frag(Varyings input) : SV_Target
+            //float frag(Varyings input) : SV_Target
+		    float frag(Varyings input, out float outDepth : SV_Depth) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 float2 screenUV = input.texcoord;
 
                 float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
+				outDepth = depth;
 				//float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, uint2(screenUV * _ScreenSize.xy)).r; // This should be a bit faster
 
                 return depth;
@@ -602,10 +652,20 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 				// We can use a gather here but that requires shader model 5.0
 				float4 neighborDepth = float4(
-					LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv0, 0).x, _ZBufferParams),
-					LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv1, 0).x, _ZBufferParams),
-					LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv2, 0).x, _ZBufferParams),
-					LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv3, 0).x, _ZBufferParams));
+					SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv0, 0).x,
+					SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv1, 0).x,
+					SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv2, 0).x,
+					SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv3, 0).x);
+
+			#if !UNITY_REVERSED_Z
+				neighborDepth = lerp(UNITY_NEAR_CLIP_VALUE.xxxx, float4(1.0, 1.0, 1.0, 1.0), neighborDepth);
+            #endif
+
+				neighborDepth = float4(
+					LinearEyeDepth(neighborDepth.x, _ZBufferParams),
+					LinearEyeDepth(neighborDepth.y, _ZBufferParams),
+					LinearEyeDepth(neighborDepth.z, _ZBufferParams),
+					LinearEyeDepth(neighborDepth.w, _ZBufferParams));
 
 				half3 normal0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, uv0, 0).xyz;
 				half3 normal1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, uv1, 0).xyz;
@@ -661,6 +721,10 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 				float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
 
+		    #if !UNITY_REVERSED_Z
+				depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth);
+            #endif
+
 				// If the current pixel is sky
 				bool isBackground = depth == UNITY_RAW_FAR_CLIP_VALUE ? true : false;
 
@@ -694,6 +758,69 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				return half4(directLighting.rgb + indirectLighting, directLighting.a);
 			}
 			ENDHLSL
-		}	
+		}
+
+		Pass
+		{
+			Name "Scene View Camera Motion Vectors"
+			Tags { "LightMode" = "Screen Space Global Illumination" }
+
+			Blend One Zero
+			ZTest Always
+			ZWrite Off
+
+			HLSLPROGRAM
+			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+			// The Blit.hlsl file provides the vertex shader (Vert),
+			// input structure (Attributes) and output structure (Varyings)
+			#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+
+			#pragma vertex Vert
+			#pragma fragment frag
+
+			#pragma target 3.5
+
+			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+
+			half4 frag(Varyings input) : SV_Target
+			{
+				UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+				float2 screenUV = input.texcoord;
+
+				float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
+                
+            #if !UNITY_REVERSED_Z
+                depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth);
+            #endif
+                
+                // Reconstruct world position
+                float3 posWS = ComputeWorldSpacePosition(screenUV, depth, UNITY_MATRIX_I_VP);
+
+                // Multiply with current and previous non-jittered view projection
+                float4 posCS = mul(_NonJitteredViewProjMatrix, float4(posWS.xyz, 1.0));
+                float4 prevPosCS = mul(_PrevViewProjMatrix, float4(posWS.xyz, 1.0));
+
+                // Non-uniform raster needs to keep the posNDC values in float to avoid additional conversions
+                // since uv remap functions use floats
+                float2 posNDC = posCS.xy * rcp(posCS.w);
+                float2 prevPosNDC = prevPosCS.xy * rcp(prevPosCS.w);
+				
+                // Calculate forward velocity
+				half2 velocity = (posNDC - prevPosNDC);
+				
+                // TODO: test that velocity.y is correct
+            #if UNITY_UV_STARTS_AT_TOP
+                velocity.y = -velocity.y;
+            #endif
+				
+                // Convert velocity from NDC space (-1..1) to screen UV 0..1 space
+                // Note: It doesn't mean we don't have negative values, we store negative or positive offset in the UV space.
+                // Note: ((posNDC * 0.5 + 0.5) - (prevPosNDC * 0.5 + 0.5)) = (velocity * 0.5)
+                velocity.xy *= 0.5;
+				
+                return float4(velocity, 0, 0);
+			}
+			ENDHLSL
+		}
     }
 }

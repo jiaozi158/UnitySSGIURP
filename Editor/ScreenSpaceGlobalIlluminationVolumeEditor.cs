@@ -45,6 +45,7 @@ class ExampleComponentEditor : VolumeComponentEditor
     const string k_EVALUATE_SH_MIXED = "EVALUATE_SH_MIXED";
     const string k_FORWARD_PLUS = "_FORWARD_PLUS";
     const string k_LIGHT_LAYERS = "_LIGHT_LAYERS";
+    const string k_WRITE_RENDERING_LAYERS = "_WRITE_RENDERING_LAYERS";
 
     const string k_RendererDataList = "m_RendererDataList";
     const string k_GetHDRCubemapEncodingQualityForPlatform = "GetHDRCubemapEncodingQualityForPlatform";
@@ -58,7 +59,7 @@ class ExampleComponentEditor : VolumeComponentEditor
     const string k_ProbeAtlasUnavailableMessage = "The current rendering path is not \"Forward+\", which may affect the accuracy of \"Ray Miss\" in large complex scenes.";
     const string k_RenderingLayerDisabledMessage = "The \"Use Rendering Layers\" is disabled in the current URP asset.";
     const string k_RenderingLayerHelpMessage = "To enable \"Rendering Layers\", make sure the \"Use Rendering Layers\" is checked in the \"Decal\" renderer feature.";
-    const string k_RenderingLayerNotSupportedMessage = "[To Be Confirmed] URP Rendering Layers are not supported on OpenGL backends.";
+    const string k_RenderingLayerNotSupportedMessage = "Rendering Layers are not supported on OpenGL backends.";
 
     const string k_PlayerSettingsPath = "Project/Player";
     const string k_FixButtonName = "Fix";
@@ -228,16 +229,18 @@ class ExampleComponentEditor : VolumeComponentEditor
     #if UNITY_2023_1_OR_NEWER
         if (m_IndirectDiffuseRenderingLayers.overrideState.boolValue && m_IndirectDiffuseRenderingLayers.value.intValue != -1)
         {
-            if (!Shader.IsKeywordEnabled(k_LIGHT_LAYERS))
+            bool enableRenderingLayers = Shader.IsKeywordEnabled(k_LIGHT_LAYERS);
+            bool hasRenderingLayersTexture = Shader.IsKeywordEnabled(k_WRITE_RENDERING_LAYERS);
+            if (!enableRenderingLayers)
             {
                 EditorGUILayout.Space();
                 EditorGUILayout.HelpBox(k_RenderingLayerDisabledMessage, MessageType.Warning, wide: true);
                 EditorGUILayout.Space();
             }
-            else
+            else if (!hasRenderingLayersTexture && !isOpenGL)
             {
                 EditorGUILayout.Space();
-                EditorGUILayout.HelpBox(k_RenderingLayerHelpMessage, MessageType.Info, wide: true);
+                EditorGUILayout.HelpBox(k_RenderingLayerHelpMessage, MessageType.Warning, wide: true);
                 EditorGUILayout.Space();
             }
 
