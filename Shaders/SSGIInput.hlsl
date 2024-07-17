@@ -99,6 +99,7 @@ TEXTURE2D_X(_SSGISampleTexture);
 TEXTURE2D_X(_SSGIHistorySampleTexture);
 TEXTURE2D_X(_SSGIHistoryDepthTexture);
 TEXTURE2D_X(_IndirectDiffuseTexture);
+TEXTURE2D_X(_SSGIHistoryCameraColorTexture);
 float4 _IndirectDiffuseTexture_TexelSize;
 
 half4 ssgi_SHAr;
@@ -119,4 +120,8 @@ half _Thickness;
 float4x4 _PrevInvViewProjMatrix;
 float3 _PrevCameraPositionWS;
 half _PixelSpreadAngleTangent;
+
+half _AggressiveDenoise;
+half4 _ReBlurBlurRotator;
+half _ReBlurDenoiserRadius;
 #endif

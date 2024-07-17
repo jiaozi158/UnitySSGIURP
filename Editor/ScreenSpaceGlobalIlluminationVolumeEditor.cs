@@ -28,6 +28,7 @@ class ExampleComponentEditor : VolumeComponentEditor
     SerializedDataParameter m_DenoiseSS;
     SerializedDataParameter m_DenoiserAlgorithm;
     SerializedDataParameter m_DenoiseIntensitySS;
+    SerializedDataParameter m_DenoiserRadiusSS;
     SerializedDataParameter m_SecondDenoiserPassSS;
 
     // Ray miss hierarchy
@@ -98,6 +99,7 @@ class ExampleComponentEditor : VolumeComponentEditor
         m_DenoiseSS = Unpack(o.Find(x => x.denoiseSS));
         m_DenoiserAlgorithm = Unpack(o.Find(x => x.denoiserAlgorithmSS));
         m_DenoiseIntensitySS = Unpack(o.Find(x => x.denoiseIntensitySS));
+        m_DenoiserRadiusSS = Unpack(o.Find(x => x.denoiserRadiusSS));
         m_SecondDenoiserPassSS = Unpack(o.Find(x => x.secondDenoiserPassSS));
 
         m_RayMiss = Unpack(o.Find(x => x.rayMiss));
@@ -219,6 +221,7 @@ class ExampleComponentEditor : VolumeComponentEditor
             {
                 PropertyField(m_DenoiserAlgorithm);
                 PropertyField(m_DenoiseIntensitySS);
+                if (m_DenoiserAlgorithm.value.enumValueIndex == (int)ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive) { PropertyField(m_DenoiserRadiusSS); }
                 PropertyField(m_SecondDenoiserPassSS);
             }
         }

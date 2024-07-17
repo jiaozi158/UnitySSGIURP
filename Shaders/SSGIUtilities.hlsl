@@ -140,7 +140,7 @@ float GenerateRandomValue(float2 screenUV)
 {
     //float time = unity_DeltaTime.y * _Time.y;
     _Seed += 1.0;
-    return GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, _FrameIndex + _Seed));
+    return GenerateHashedRandomFloat(uint3(screenUV * _BlitTexture_TexelSize.zw, _FrameIndex + _Seed));
 }
 
 void HitSurfaceDataFromGBuffer(float2 screenUV, inout RayHit rayHit, bool isBackHit = false)

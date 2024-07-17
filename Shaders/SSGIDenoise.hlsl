@@ -5,18 +5,6 @@
 #include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIUtilities.hlsl"
 #include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIConfig.hlsl"
 
-#define _DenoiserFilterRadius 0.6
-half ComputeMaxDenoisingRadius(float3 positionWS)
-{
-    // Compute the distance to the pixel
-    float distanceToPoint = length(positionWS - GetCameraPositionWS());
-    // This is purely empirical, values were obtained  while experimenting with various scenes and these values give good visual results.
-    // The world space radius for sample picking goes from distance/10.0 to distance/50.0 linearly until reaching 500.0 meters away from the camera
-    // and it is always 20.0f (or two pixels if subpixel.
-    // TODO: @Anis, I have a bunch of idea how to make this better and less empirical but it's for any other day
-    return distanceToPoint * _DenoiserFilterRadius / lerp(5.0, 50.0, saturate(distanceToPoint / 500.0));
-}
-
 half ComputeMaxReprojectionWorldRadius(float3 positionWS, half3 viewDirWS, half3 normalWS, half pixelSpreadAngleTangent, half maxDistance, half pixelTolerance)
 {
     half parallelPixelFootPrint = pixelSpreadAngleTangent * length(positionWS - GetCameraPositionWS());
@@ -61,4 +49,136 @@ half3 DirectClipToAABB(half3 history, half3 minimum, half3 maximum)
     else
         return history;
 }
+
+half sqr(half value)
+{
+	return value * value;
+}
+
+#define K 0.5
+
+half HitDistanceAttenuation(half linearRoughness, float cameraDistance, float hitDistance)
+{
+	half f = hitDistance / (hitDistance + cameraDistance);
+	return lerp(K * linearRoughness, 1.0, f);
+}
+
+half GetSpecularDominantFactor(half NoV, half linearRoughness)
+{
+	half a = 0.298475 * log(39.4115 - 39.0029 * linearRoughness);
+	half dominantFactor = pow(saturate(1.0 - NoV), 10.8649) * (1.0 - a) + a;
+	return saturate(dominantFactor);
+}
+
+half3 GetSpecularDominantDirectionWithFactor(half3 N, half3 V, half dominantFactor)
+{
+	half3 R = reflect(-V, N);
+	half3 D = lerp(N, R, dominantFactor);
+
+	return normalize(D);
+}
+
+half4 GetSpecularDominantDirection(half3 N, half3 V, half linearRoughness)
+{
+	half NoV = abs(dot(N, V));
+	half dominantFactor = GetSpecularDominantFactor(NoV, linearRoughness);
+
+	return half4(GetSpecularDominantDirectionWithFactor(N, V, dominantFactor), dominantFactor);
+}
+
+half2x3 GetKernelBasis(half3 V, half3 N, half linearRoughness)
+{
+	half3x3 basis = GetLocalFrame(N);
+	half3 T = basis[0];
+	half3 B = basis[1];
+	half NoV = abs(dot(N, V));
+	half f = GetSpecularDominantFactor(NoV, linearRoughness);
+	half3 R = reflect(-V, N);
+	half3 D = normalize(lerp(N, R, f));
+	half NoD = abs(dot(N, D));
+
+	if (NoD < 0.999 && linearRoughness != 1.0)
+	{
+		half3 Dreflected = reflect(-D, N);
+		T = normalize(cross(N, Dreflected));
+		B = cross(Dreflected, T);
+
+		half NoV = abs(dot(N, V));
+		half acos01sq = saturate(1.0 - NoV);
+		half skewFactor = lerp(1.0, linearRoughness, sqrt(acos01sq));
+		T *= skewFactor;
+	}
+
+	return half2x3(T, B);
+}
+
+#define POISSON_SAMPLE_COUNT 8
+static const half3 k_PoissonDiskSamples[POISSON_SAMPLE_COUNT] =
+{
+	// https://www.desmos.com/calculator/abaqyvswem
+	half3(-1.00             ,  0.00             , 1.0),
+	half3(0.00             ,  1.00             , 1.0),
+	half3(1.00             ,  0.00             , 1.0),
+	half3(0.00             , -1.00             , 1.0),
+	half3(-0.25 * sqrt(2.0) ,  0.25 * sqrt(2.0) , 0.5),
+	half3(0.25 * sqrt(2.0) ,  0.25 * sqrt(2.0) , 0.5),
+	half3(0.25 * sqrt(2.0) , -0.25 * sqrt(2.0) , 0.5),
+	half3(-0.25 * sqrt(2.0) , -0.25 * sqrt(2.0) , 0.5)
+};
+
+half GetGaussianWeight(half r)
+{
+	return exp(-0.66 * r * r); // assuming r is normalized to 1
+}
+
+half GetSpecularLobeHalfAngle(half linearRoughness, half percentOfVolume = 0.75)
+{
+	half m = linearRoughness * linearRoughness;
+	// https://seblagarde.files.wordpress.com/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf (page 72)
+	// TODO: % of NDF volume - is it the trimming factor from VNDF sampling?
+	return atan(m * percentOfVolume / (1.0 - percentOfVolume));
+}
+
+half GetSpecMagicCurve2(half roughness, half percentOfVolume = 0.987)
+{
+	half angle = GetSpecularLobeHalfAngle(roughness, percentOfVolume);
+	half almostHalfPi = GetSpecularLobeHalfAngle(1.0, percentOfVolume);
+	return saturate(angle / almostHalfPi);
+}
+
+half ComputeBlurRadius(half roughness, half maxRadius)
+{
+	return maxRadius * GetSpecMagicCurve2(roughness);
+}
+
+half2 RotateVector(half4 rotator, half2 v)
+{
+	return v.x * rotator.xz + v.y * rotator.yw;
+}
+
+float2 GetKernelSampleCoordinates(half3 offset, float3 X, half3 T, half3 B, half4 rotator)
+{
+	// We can't rotate T and B instead, because T is skewed
+	offset.xy = RotateVector(rotator, offset.xy);
+
+	// Compute the world space position
+	float3 wsPos = X + T * offset.x + B * offset.y;
+
+	// Evaluate the NDC position
+	float4 hClip = TransformWorldToHClip(wsPos);
+	hClip.xyz /= hClip.w;
+
+	// Convert it to screen sample space
+	float2 nDC = hClip.xy * 0.5 + 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+	nDC.y = 1.0 - nDC.y;
+#endif
+	return nDC;
+}
+
+// Maximum world space radius of the blur
+#define BLUR_MAX_RADIUS 0.04
+#define MIN_BLUR_DISTANCE 0.03
+#define BLUR_OUT_RANGE 0.05
+
 #endif

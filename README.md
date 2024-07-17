@@ -31,7 +31,7 @@ Documentation
 Requirements
 ------------
 - Unity 2022.3.35f1 and URP 14 or above.
-- Motion vectors in older URP versions (ex. Unity 2022.3.0f1) may cause severe ghosting. Please upgrade to the latest minor version (ex. "37f1").
+- Motion vectors in older URP versions (ex. Unity 2022.3.0f1) may cause severe ghosting. Please upgrade to the latest patch version (ex. "37f1").
 - Shader model 3.5 or above (at leaset OpenGL ES 3.0 or equivalent)
 - [Extra steps](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/ForwardPathSupport.md#opengl-platforms-extra-setup) are needed for OpenGL APIs.
  

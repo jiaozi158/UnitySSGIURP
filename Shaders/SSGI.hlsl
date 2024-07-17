@@ -5,7 +5,7 @@
 #include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIDenoise.hlsl"
 
 // If no intersection, "rayHit.distance" will remain "REAL_EPS".
-RayHit RayMarching(Ray ray, half dither, half3 viewDirectionWS)
+RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
 {
     RayHit rayHit = InitializeRayHit();
 
@@ -28,7 +28,7 @@ RayHit RayMarching(Ray ray, half dither, half3 viewDirectionWS)
 
     // Interpolate the intersecting position using the depth difference.
     //float lastDepthDiff = 0.0;
-    //float2 lastRayPositionNDC = float2(0.0, 0.0);
+    float2 lastRayPositionNDC = screenUV;
     float3 lastRayPositionWS = ray.position; // avoid using 0 for the first interpolation
 
     bool startBinarySearch = false;
@@ -65,7 +65,7 @@ RayHit RayMarching(Ray ray, half dither, half3 viewDirectionWS)
         rayPositionWS += (currStepSize + currStepSize * dither) * ray.direction;
 
         float3 rayPositionNDC = ComputeNormalizedDeviceCoordinatesWithZ(rayPositionWS, GetWorldToHClipMatrix());
-        float3 lastRayPositionNDC = ComputeNormalizedDeviceCoordinatesWithZ(lastRayPositionWS, GetWorldToHClipMatrix());
+        //float3 lastRayPositionNDC = ComputeNormalizedDeviceCoordinatesWithZ(lastRayPositionWS, GetWorldToHClipMatrix());
 
         // Move to the next step if the current ray moves less than 1 pixel across the screen.
         if (i <= MAX_MEDIUM_STEP && abs(rayPositionNDC.x - lastRayPositionNDC.x) < _BlitTexture_TexelSize.x && abs(rayPositionNDC.y - lastRayPositionNDC.y) < _BlitTexture_TexelSize.y)
@@ -181,7 +181,7 @@ RayHit RayMarching(Ray ray, half dither, half3 viewDirectionWS)
             if (_BackDepthEnabled = 2.0 && isBackBuffer)
                 rayHit.emission = SAMPLE_TEXTURE2D_X_LOD(_CameraBackOpaqueTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).rgb;
             else
-                rayHit.emission = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).rgb;
+                rayHit.emission = SAMPLE_TEXTURE2D_X_LOD(_SSGIHistoryCameraColorTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).rgb;
 
             break;
         }
@@ -198,7 +198,7 @@ RayHit RayMarching(Ray ray, half dither, half3 viewDirectionWS)
         // Update last step's depth difference.
         //lastDepthDiff = (isBackSearch) ? backDepthDiff : depthDiff;
         isBackBuffer = backDepthValid && _BackDepthEnabled == 2.0 ? backDepthDiff > 0.0 : false;
-        //lastRayPositionNDC = rayPositionNDC.xy;
+        lastRayPositionNDC = rayPositionNDC.xy;
         lastRayPositionWS = rayPositionWS.xyz;
     }
     return rayHit;

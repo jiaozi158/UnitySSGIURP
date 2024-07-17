@@ -146,6 +146,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private static readonly int _HistoryTextureValid = Shader.PropertyToID("_HistoryTextureValid");
     private static readonly int _IndirectDiffuseLightingMultiplier = Shader.PropertyToID("_IndirectDiffuseLightingMultiplier");
     private static readonly int _IndirectDiffuseRenderingLayers = Shader.PropertyToID("_IndirectDiffuseRenderingLayers");
+    private static readonly int _AggressiveDenoise = Shader.PropertyToID("_AggressiveDenoise");
+    private static readonly int _ReBlurBlurRotator = Shader.PropertyToID("_ReBlurBlurRotator");
+    private static readonly int _ReBlurDenoiserRadius = Shader.PropertyToID("_ReBlurDenoiserRadius");
 
     private const string _CameraDepthTexture = "_CameraDepthTexture";
     private const string _IndirectDiffuseTexture = "_IndirectDiffuseTexture";
@@ -157,6 +160,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private const string _HistoryIndirectDiffuseTexture = "_HistoryIndirectDiffuseTexture";
     private const string _SSGISampleTexture = "_SSGISampleTexture";
     private const string _SSGIHistorySampleTexture = "_SSGIHistorySampleTexture";
+    private const string _SSGIHistoryCameraColorTexture = "_SSGIHistoryCameraColorTexture";
 
     private static readonly int cameraDepthTexture = Shader.PropertyToID(_CameraDepthTexture);
     private static readonly int indirectDiffuseTexture = Shader.PropertyToID(_IndirectDiffuseTexture);
@@ -168,6 +172,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private static readonly int historyIndirectDiffuseTexture = Shader.PropertyToID(_HistoryIndirectDiffuseTexture);
     private static readonly int ssgiSampleTexture = Shader.PropertyToID(_SSGISampleTexture);
     private static readonly int ssgiHistorySampleTexture = Shader.PropertyToID(_SSGIHistorySampleTexture);
+    private static readonly int ssgiHistoryCameraColorTexture = Shader.PropertyToID(_SSGIHistoryCameraColorTexture);
 
     private const string _GBuffer0 = "_GBuffer0";
     private const string _GBuffer1 = "_GBuffer1";
@@ -290,6 +295,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         bool isActive = ssgiVolume != null && ssgiVolume.IsActive();
         bool isDebugger = DebugManager.instance.isAnyDebugUIActive;
         bool shouldDisable = !m_ReflectionProbes && renderingData.cameraData.camera.cameraType == CameraType.Reflection;
+        shouldDisable |= ssgiVolume.indirectDiffuseLightingMultiplier.value == 0.0f && !m_OverrideAmbientLighting;
 
         if (!isActive || shouldDisable)
             return;
@@ -319,8 +325,10 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         m_SSGIMaterial.SetFloat(_Thickness, ssgiVolume.depthBufferThickness.value);
         m_SSGIMaterial.SetFloat(_RayCount, ssgiVolume.sampleCount.value);
         m_SSGIMaterial.SetFloat(_TemporalIntensity, ssgiVolume.denoiseIntensitySS.value);
+        m_SSGIMaterial.SetFloat(_ReBlurDenoiserRadius, ssgiVolume.denoiserRadiusSS.value * 2.0f);
         m_SSGIMaterial.SetFloat(_IndirectDiffuseLightingMultiplier, ssgiVolume.indirectDiffuseLightingMultiplier.value);
         m_SSGIMaterial.SetFloat(_MaxBrightness, 7.0f);
+        m_SSGIMaterial.SetFloat(_AggressiveDenoise, ssgiVolume.denoiserAlgorithmSS == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive ? 1.0f : 0.0f);
 
     #if UNITY_2023_1_OR_NEWER
         bool enableRenderingLayers = Shader.IsKeywordEnabled(_WRITE_RENDERING_LAYERS) && ssgiVolume.indirectDiffuseRenderingLayers.value.value != 0xFFFF;
@@ -531,6 +539,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         private RTHandle m_AccumulateSampleHandle;
         private RTHandle m_AccumulateHistorySampleHandle;
 
+        private RTHandle m_HistoryCameraColorHandle;
+
         private readonly RenderTargetIdentifier[] rTHandles = new RenderTargetIdentifier[2];
 
         private Matrix4x4 prevCamInvVPMatrix;
@@ -542,6 +552,10 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         private float resolutionScale = 1.0f;
         private float historyCameraScaledWidth;
         private float historyCameraScaledHeight;
+
+        public static readonly float[] k_PreBlurRands = new float[] { 0.840188f, 0.394383f, 0.783099f, 0.79844f, 0.911647f, 0.197551f, 0.335223f, 0.76823f, 0.277775f, 0.55397f, 0.477397f, 0.628871f, 0.364784f, 0.513401f, 0.95223f, 0.916195f, 0.635712f, 0.717297f, 0.141603f, 0.606969f, 0.0163006f, 0.242887f, 0.137232f, 0.804177f, 0.156679f, 0.400944f, 0.12979f, 0.108809f, 0.998924f, 0.218257f, 0.512932f, 0.839112f };
+        public static readonly float[] k_BlurRands = new float[] { 0.61264f, 0.296032f, 0.637552f, 0.524287f, 0.493583f, 0.972775f, 0.292517f, 0.771358f, 0.526745f, 0.769914f, 0.400229f, 0.891529f, 0.283315f, 0.352458f, 0.807725f, 0.919026f, 0.0697553f, 0.949327f, 0.525995f, 0.0860558f, 0.192214f, 0.663227f, 0.890233f, 0.348893f, 0.0641713f, 0.020023f, 0.457702f, 0.0630958f, 0.23828f, 0.970634f, 0.902208f, 0.85092f };
+        public static readonly float[] k_PostBlurRands = new float[] { 0.266666f, 0.53976f, 0.375207f, 0.760249f, 0.512535f, 0.667724f, 0.531606f, 0.0392803f, 0.437638f, 0.931835f, 0.93081f, 0.720952f, 0.284293f, 0.738534f, 0.639979f, 0.354049f, 0.687861f, 0.165974f, 0.440105f, 0.880075f, 0.829201f, 0.330337f, 0.228968f, 0.893372f, 0.35036f, 0.68667f, 0.956468f, 0.58864f, 0.657304f, 0.858676f, 0.43956f, 0.92397f };
 
         public ScreenSpaceGlobalIlluminationPass(Material material)
         {
@@ -587,11 +601,11 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
                     if (ssgiVolume.denoiserAlgorithmSS.value == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive)
                     {
-                        Blitter.BlitCameraTexture(cmd, m_DiffuseHandle, m_IntermediateDiffuseHandle, m_SSGIMaterial, pass: 3);
-                        Blitter.BlitCameraTexture(cmd, m_IntermediateDiffuseHandle, m_DiffuseHandle, m_SSGIMaterial, pass: 3);
+                        Blitter.BlitCameraTexture(cmd, m_DiffuseHandle, m_IntermediateDiffuseHandle, m_SSGIMaterial, pass: 8);
+                        Blitter.BlitCameraTexture(cmd, m_IntermediateDiffuseHandle, m_DiffuseHandle, m_SSGIMaterial, pass: 8);
 
-                        //Blitter.BlitCameraTexture(cmd, m_DiffuseHandle, m_IntermediateDiffuseHandle, m_SSGIMaterial, pass: 3);
-                        //Blitter.BlitCameraTexture(cmd, m_IntermediateDiffuseHandle, m_DiffuseHandle, m_SSGIMaterial, pass: 3);
+                        //Blitter.BlitCameraTexture(cmd, m_DiffuseHandle, m_IntermediateDiffuseHandle, m_SSGIMaterial, pass: 8);
+                        //Blitter.BlitCameraTexture(cmd, m_IntermediateDiffuseHandle, m_DiffuseHandle, m_SSGIMaterial, pass: 8);
                     }
 
                     if (ssgiVolume.secondDenoiserPassSS.value)
@@ -626,6 +640,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
                 // Combine
                 Blitter.BlitCameraTexture(cmd, m_IntermediateCameraColorHandle, colorHandle, m_SSGIMaterial, pass: 6);
+
+                // Copy History Scene Color
+                Blitter.BlitCameraTexture(cmd, colorHandle, m_HistoryCameraColorHandle);
             }
             context.ExecuteCommandBuffer(cmd);
             cmd.Clear();
@@ -643,8 +660,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 m_SSGIMaterial.SetFloat(probeSet, 0.0f);
 
             m_SSGIMaterial.SetFloat(frameIndex, frameCount);
-            frameCount += 7;
-            frameCount %= 60000;
+            m_SSGIMaterial.SetVector(_ReBlurBlurRotator, EvaluateRotator(k_BlurRands[frameCount % 32]));
+            frameCount += 33;
+            frameCount %= 64000;
 
             bool denoiseStateChanged = ssgiVolume.denoiseSS.value && !enableDenoise;
             bool resolutionStateChanged = ssgiVolume.fullResolutionSS.value ? resolutionScale != 1.0f : ssgiVolume.resolutionScaleSS.value != resolutionScale;
@@ -695,10 +713,14 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
             // Avoid reprojecting from uninitialized history texture
             if (isHistoryTextureValid)
+            {
                 m_SSGIMaterial.SetFloat(_HistoryTextureValid, 1.0f);
+                m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_HistoryCameraColorHandle);
+            }
             else
             {
                 m_SSGIMaterial.SetFloat(_HistoryTextureValid, 0.0f);
+                m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_IntermediateCameraColorHandle);
                 isHistoryTextureValid = true;
             }
 
@@ -716,6 +738,12 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
             desc.width = Mathf.FloorToInt(desc.width * resolutionScale);
             desc.height = Mathf.FloorToInt(desc.height * resolutionScale);
+
+        #if UNITY_6000_0_OR_NEWER
+            RenderingUtils.ReAllocateHandleIfNeeded(ref m_HistoryCameraColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: _SSGIHistoryCameraColorTexture);
+        #else
+            RenderingUtils.ReAllocateIfNeeded(ref m_HistoryCameraColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: _SSGIHistoryCameraColorTexture);
+        #endif
 
             desc.graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat;
             depthDesc.colorFormat = RenderTextureFormat.RFloat;
@@ -765,6 +793,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             internal TextureHandle cameraDepthTextureHandle;
 
             internal TextureHandle intermediateCameraColorHandle;
+            internal TextureHandle historyCameraColorHandle;
 
             // SSGI diffuse lighting
             internal TextureHandle diffuseHandle;
@@ -778,7 +807,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
             internal bool denoise;
             internal bool secondDenoise;
-            internal bool spatialFiltering;
+            internal bool aggressiveDenoise;
             internal bool overrideAmbientLighting;
         }
 
@@ -819,13 +848,13 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 Blitter.BlitTexture(cmd, data.intermediateDiffuseHandle, new Vector4(1.0f, 1.0f, 0.0f, 0.0f), data.ssgiMaterial, pass: 2);
 
 
-                if (data.spatialFiltering)
+                if (data.aggressiveDenoise)
                 {
-                    Blitter.BlitCameraTexture(cmd, data.diffuseHandle, data.intermediateDiffuseHandle, data.ssgiMaterial, pass: 3);
-                    Blitter.BlitCameraTexture(cmd, data.intermediateDiffuseHandle, data.diffuseHandle, data.ssgiMaterial, pass: 3);
+                    Blitter.BlitCameraTexture(cmd, data.diffuseHandle, data.intermediateDiffuseHandle, data.ssgiMaterial, pass: 8);
+                    Blitter.BlitCameraTexture(cmd, data.intermediateDiffuseHandle, data.diffuseHandle, data.ssgiMaterial, pass: 8);
 
-                    //Blitter.BlitCameraTexture(cmd, data.diffuseHandle, data.intermediateDiffuseHandle, data.ssgiMaterial, pass: 3);
-                    //Blitter.BlitCameraTexture(cmd, data.intermediateDiffuseHandle, data.diffuseHandle, data.ssgiMaterial, pass: 3);
+                    //Blitter.BlitCameraTexture(cmd, data.diffuseHandle, data.intermediateDiffuseHandle, data.ssgiMaterial, pass: 8);
+                    //Blitter.BlitCameraTexture(cmd, data.intermediateDiffuseHandle, data.diffuseHandle, data.ssgiMaterial, pass: 8);
                 }
 
                 if (data.secondDenoise)
@@ -860,6 +889,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
             // Combine
             Blitter.BlitCameraTexture(cmd, data.intermediateCameraColorHandle, data.cameraColorTargetHandle, data.ssgiMaterial, pass: 6);
+
+            // Copy History Scene Color
+            Blitter.BlitCameraTexture(cmd, data.cameraColorTargetHandle, data.historyCameraColorHandle);
         }
 
         // This is where the renderGraph handle can be accessed.
@@ -885,8 +917,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                     m_SSGIMaterial.SetFloat(probeSet, 0.0f);
 
                 m_SSGIMaterial.SetFloat(frameIndex, frameCount);
-                frameCount += 7;
-                frameCount %= 60000;
+                m_SSGIMaterial.SetVector(_ReBlurBlurRotator, EvaluateRotator(k_BlurRands[frameCount % 32]));
+                frameCount += 33;
+                frameCount %= 64000;
 
                 bool denoiseStateChanged = ssgiVolume.denoiseSS.value && !enableDenoise;
                 bool resolutionStateChanged = ssgiVolume.fullResolutionSS.value ? resolutionScale != 1.0f : ssgiVolume.resolutionScaleSS.value != resolutionScale;
@@ -904,7 +937,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
                 passData.denoise = enableDenoise;
                 passData.secondDenoise = ssgiVolume.secondDenoiserPassSS.value;
-                passData.spatialFiltering = ssgiVolume.denoiserAlgorithmSS.value == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive;
+                passData.aggressiveDenoise = ssgiVolume.denoiserAlgorithmSS.value == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive;
                 passData.overrideAmbientLighting = overrideAmbientLighting;
 
                 if (camera.cameraType != CameraType.Reflection)
@@ -942,10 +975,14 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
                 // Avoid reprojecting from uninitialized history texture
                 if (isHistoryTextureValid)
+                {
                     m_SSGIMaterial.SetFloat(_HistoryTextureValid, 1.0f);
+                    m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_HistoryCameraColorHandle);
+                }
                 else
                 {
                     m_SSGIMaterial.SetFloat(_HistoryTextureValid, 0.0f);
+                    m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_IntermediateCameraColorHandle);
                     isHistoryTextureValid = true;
                 }
 
@@ -964,6 +1001,12 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 TextureHandle diffuseHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, name: _IndirectDiffuseTexture, false, FilterMode.Point, TextureWrapMode.Clamp);
 
                 TextureHandle intermediateDiffuseHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, name: _IntermediateIndirectDiffuseTexture, false, FilterMode.Point, TextureWrapMode.Clamp);
+
+                RenderingUtils.ReAllocateHandleIfNeeded(ref m_HistoryCameraColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: _SSGIHistoryCameraColorTexture);
+                m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_HistoryCameraColorHandle);
+                TextureHandle historyCameraColorHandle = renderGraph.ImportTexture(m_HistoryCameraColorHandle);
+                passData.historyCameraColorHandle = historyCameraColorHandle;
+                builder.UseTexture(historyCameraColorHandle, AccessFlags.ReadWrite);
 
                 depthDesc.colorFormat = RenderTextureFormat.RFloat;
                 //depthDesc.graphicsFormat = GraphicsFormat.None;
@@ -1029,6 +1072,13 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             m_HistoryDepthHandle?.Release();
             m_AccumulateSampleHandle?.Release();
             m_AccumulateHistorySampleHandle?.Release();
+        }
+
+        Vector4 EvaluateRotator(float rand)
+        {
+            float ca = Mathf.Cos(rand);
+            float sa = Mathf.Sin(rand);
+            return new Vector4(ca, sa, -sa, ca);
         }
 
         private void UpdateReflectionProbe(NativeArray<VisibleReflectionProbe> visibleReflectionProbes, Vector3 cameraPosition)

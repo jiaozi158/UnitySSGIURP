@@ -124,6 +124,12 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
     public ClampedFloatParameter denoiseIntensitySS = new ClampedFloatParameter(0.95f, 0.5f, 0.95f, false);
 
     /// <summary>
+    /// Defines the radius of the GI denoiser (First Pass).
+    /// </summary>
+    [InspectorName("Denoiser Radius"), Tooltip("Controls the radius of the GI denoiser (First Pass).")]
+    public ClampedFloatParameter denoiserRadiusSS = new ClampedFloatParameter(0.6f, 0.001f, 1.0f, false);
+
+    /// <summary>
     /// Defines if the second denoising pass should be enabled.
     /// </summary>
     [InspectorName("Second Denoiser Pass"), Tooltip("Enable second denoising pass.")]

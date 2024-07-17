@@ -11,12 +11,13 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 		// Pass 0: Copy Direct Lighting
 		// Pass 1: SSGI
-		// Pass 2: Reproject GI
-		// Pass 3: Spatial Filtering
+		// Pass 2: Temporal Reprojection
+		// Pass 3: Edge-Avoiding Spatial Denoise
 		// Pass 4: Temporal Stabilization
 		// Pass 5: Copy History Depth
 		// Pass 6: Combine & Upscale GI
 		// Pass 7: [Editor only] Camera Motion Vectors
+		// Pass 8: Poisson Disk Recurrent Denoise
 
 		Pass
 		{
@@ -171,9 +172,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float3 prevPositionWS = ComputeWorldSpacePosition(prevUV, prevDeviceDepth, _PrevInvViewProjMatrix);
 				half radius = length(prevPositionWS - positionWS) / maxRadius;
 
-				// Is it too far from the current position?
-				bool traceProbes = (prevUV.x > 1.0 || prevUV.x < 0.0 || prevUV.y > 1.0 || prevUV.y < 0.0 || radius > 1.0 || !_HistoryTextureValid);
-
+				bool canBeReprojected = (prevUV.x <= 1.0 && prevUV.x >= 0.0 && prevUV.y <= 1.0 && prevUV.y >= 0.0 && radius <= 1.0 && _HistoryTextureValid);
 
 				Ray ray;
 				ray.position = cameraPositionWS;
@@ -183,59 +182,48 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				RayHit screenHit = InitializeRayHit();
 				screenHit.distance = length(cameraPositionWS - positionWS);
 				screenHit.position = positionWS;
-				screenHit.normal = normalSmoothness.xyz; //SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyz;
+				screenHit.normal = normalSmoothness.xyz;
 
-				/*
-			#if defined(_GBUFFER_NORMALS_OCT)
-				half2 remappedOctNormalWS = half2(Unpack888ToFloat2(screenHit.normal));                // values between [ 0, +1]
-				half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                    // values between [-1, +1]
-				screenHit.normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
-			#endif
-				*/
-
+				// If reprojection fails, we increase the number of samples and reduce ray marching quality.
 				UNITY_BRANCH
-				if (!traceProbes)
+				if (!canBeReprojected)
 				{
-					// Set the hit distance to 0
-					lightingDistance.a = 0.0;
-
-					half dither = (GenerateRandomValue(screenUV) * 0.3 - 0.15);
-
-					UNITY_LOOP
-					for (int i = 0; i < RAY_COUNT; i++)
-					{
-						RayHit rayHit = screenHit;
-
-						// Generate a new sample direction
-						ray.direction = SampleHemisphereCosine(GenerateRandomValue(screenUV), GenerateRandomValue(screenUV), rayHit.normal);
-						ray.position = rayHit.position;
-
-						// Find the intersection of the ray with scene geometries
-						rayHit = RayMarching(ray, dither, viewDirectionWS);
-
-						bool hitSuccessful = rayHit.distance > REAL_EPS;
-
-						UNITY_BRANCH
-						if (hitSuccessful)
-						{
-							lightingDistance.rgb += rayHit.emission * rcp(RAY_COUNT);
-							lightingDistance.a += rayHit.distance * rcp(RAY_COUNT);
-						}
-						else
-						{
-							lightingDistance.rgb += SampleReflectionProbes(ray.direction, positionWS, 1.0h, screenUV) * rcp(RAY_COUNT);
-							lightingDistance.a += 1.0 * rcp(RAY_COUNT);
-						}
-					}
+					MAX_STEP = 8;
+					MAX_SMALL_STEP = 0;
+					MAX_MEDIUM_STEP = 3;
+					STEP_SIZE = 0.6;
+					MEDIUM_STEP_SIZE = 0.1;
+					RAY_COUNT = 4;
 				}
-				else
+
+				// Set the hit distance to 0
+				lightingDistance.a = 0.0;
+
+				half dither = (GenerateRandomValue(screenUV) * 0.3 - 0.15);
+
+				for (int i = 0; i < RAY_COUNT; i++)
 				{
-					const half rayCount = 16;
-					UNITY_LOOP
-					for (int i = 0; i < rayCount; i++)
+					RayHit rayHit = screenHit;
+
+					// Generate a new sample direction
+					ray.direction = SampleHemisphereCosine(GenerateRandomValue(screenUV), GenerateRandomValue(screenUV), rayHit.normal);
+					ray.position = rayHit.position;
+
+					// Find the intersection of the ray with scene geometries
+					rayHit = RayMarching(ray, screenUV, dither, viewDirectionWS);
+
+					bool hitSuccessful = rayHit.distance > REAL_EPS;
+
+					UNITY_BRANCH
+					if (hitSuccessful)
 					{
-						ray.direction = SampleHemisphereCosine(GenerateRandomValue(screenUV), GenerateRandomValue(screenUV), screenHit.normal);
-						lightingDistance.rgb += SampleReflectionProbes(ray.direction, positionWS, 1.0h, screenUV) * rcp(rayCount);
+						lightingDistance.rgb += rayHit.emission * rcp(RAY_COUNT);
+						lightingDistance.a += rayHit.distance * rcp(RAY_COUNT);
+					}
+					else
+					{
+						lightingDistance.rgb += SampleReflectionProbes(ray.direction, positionWS, 1.0h, screenUV) * rcp(RAY_COUNT);
+						lightingDistance.a += 1.0 * rcp(RAY_COUNT);
 					}
 				}
 
@@ -251,7 +239,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 		
 		Pass
 		{
-			Name "Reproject GI"
+			Name "Temporal Reprojection"
 			Tags { "LightMode" = "Screen Space Global Illumination" }
 
 			Blend One Zero
@@ -325,25 +313,57 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 					canBeReprojected = false;
 				}
 
-				// Depending on the roughness of the surface run one or the other temporal reprojection
-				half sampleCount = historySample;
+				// Re-projected color from last frame.
+				half3 prevColor = SAMPLE_TEXTURE2D_X_LOD(_HistoryIndirectDiffuseTexture, sampler_LinearClamp, prevUV, 0).rgb;
+
+				half accumulationFactor = (historySample >= MAX_ACCUM_FRAME_NUM ? _TemporalIntensity : (historySample / (historySample + 1.0)));
+
+				half sampleCount = clamp(historySample + 1.0, 0.0, MAX_ACCUM_FRAME_NUM);
 
 				half3 result;
-				if (canBeReprojected && sampleCount != 0.0)
+
+				UNITY_BRANCH
+				if (canBeReprojected && historySample != 0.0)
 				{
-					half3 prevColor = SAMPLE_TEXTURE2D_X_LOD(_HistoryIndirectDiffuseTexture, sampler_LinearClamp, prevUV, 0).rgb;
-
-					half accumulationFactor = (sampleCount >= MAX_ACCUM_FRAME_NUM ? _TemporalIntensity : (sampleCount / (sampleCount + 1.0)));
-						
 					result = (currentColor.rgb * (1.0 - accumulationFactor) + prevColor.rgb * accumulationFactor);
+				}
+				else if (_AggressiveDenoise == 1.0)
+				{
+					// Performance cost here can be reduced by removing less important operations.
+					
+					// Color Variance
+					half3 boxMax = currentColor.rgb;
+					half3 boxMin = currentColor.rgb;
+					half3 moment1 = currentColor.rgb;
+					half3 moment2 = currentColor.rgb * currentColor.rgb;
 
-					sampleCount = clamp(sampleCount + 1.0, 0.0, MAX_ACCUM_FRAME_NUM);
+					// adjacent pixels
+					AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, 0.0, -1.0);
+					AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, -1.0, 0.0);
+					AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, 1.0, 0.0);
+					AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, 0.0, 1.0);
+
+					/*
+					// remaining pixels in a 9x9 square (excluding center)
+					AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, -1.0, -1.0);
+					AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, 1.0, -1.0);
+					AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, -1.0, 1.0);
+					AdjustColorBox(boxMin, boxMax, moment1, moment2, screenUV, 1.0, 1.0);
+					*/
+
+					// Can be replace by clamp() to reduce performance cost.
+					//prevColor = DirectClipToAABB(prevColor, boxMin, boxMax);
+					prevColor = max(clamp(prevColor, boxMin, boxMax), half3(0.0, 0.0, 0.0));
+
+					// We still try to reuse (clamped) history samples even if they are invalid
+					result = (currentColor.rgb * (1.0 - accumulationFactor) + prevColor.rgb * accumulationFactor);
 				}
 				else
 				{
 					result = currentColor.rgb;
-					sampleCount = MAX_ACCUM_FRAME_NUM; // multiple samples from reflection probe, almost no noise
+					sampleCount = 1.0;
 				}
+
 
 				denoiseOutput = half4(result, currentColor.a);
 				//denoiseOutput = half4(historySample.xxx * rcp(MAX_ACCUM_FRAME_NUM) - rcp(MAX_ACCUM_FRAME_NUM), currentColor.a); // debug sample count
@@ -571,7 +591,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			Tags { "LightMode" = "Screen Space Global Illumination" }
 
             Blend One Zero
-			ZWrite On
+			//ZWrite On
 			
 			HLSLPROGRAM
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -592,15 +612,16 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
             TEXTURE2D_X(_CameraDepthTexture);
 			SAMPLER(my_point_clamp_sampler);
             
-            //float frag(Varyings input) : SV_Target
-		    float frag(Varyings input, out float outDepth : SV_Depth) : SV_Target
+			//float frag(Varyings input, out float outDepth : SV_Depth) : SV_Target
+            float frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 float2 screenUV = input.texcoord;
 
                 float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
-				outDepth = depth;
 				//float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, uint2(screenUV * _ScreenSize.xy)).r; // This should be a bit faster
+				
+				//outDepth = depth;
 
                 return depth;
             }
@@ -819,6 +840,172 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
                 velocity.xy *= 0.5;
 				
                 return float4(velocity, 0, 0);
+			}
+			ENDHLSL
+		}
+
+		Pass
+		{
+		    // Modified from HDRP's ReBLUR denoiser
+			Name "Poisson Disk Recurrent Denoise"
+			Tags { "LightMode" = "Screen Space Global Illumination" }
+
+			Blend One Zero
+
+			HLSLPROGRAM
+			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+			// The Blit.hlsl file provides the vertex shader (Vert),
+			// input structure (Attributes) and output structure (Varyings)
+			#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
+
+			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+
+			#pragma vertex Vert
+			#pragma fragment frag
+
+			#pragma target 3.5
+
+			#pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
+
+			half4 frag(Varyings input) : SV_Target
+			{
+				UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+				float2 screenUV = input.texcoord;
+
+				float centerDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
+
+			#if !UNITY_REVERSED_Z
+				centerDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, centerDepth);
+			#endif
+
+				// If the current pixel is sky
+				bool isBackground = centerDepth == UNITY_RAW_FAR_CLIP_VALUE ? true : false;
+
+				if (isBackground)
+					discard;
+
+				float3 positionWS = ComputeWorldSpacePosition(screenUV, centerDepth, UNITY_MATRIX_I_VP);
+				centerDepth = Linear01Depth(centerDepth, _ZBufferParams);
+
+				// Center Signal
+				half4 centerSignal = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0);
+
+				// Number of accumulated frames
+				half accumulationFactor = SAMPLE_TEXTURE2D_X_LOD(_SSGISampleTexture, my_point_clamp_sampler, screenUV, 0).r;
+
+				// Evaluate the position and view vectors
+				float3 cameraPositionWS = GetCameraPositionWS();
+				half3 viewDirectionWS = normalize(cameraPositionWS - positionWS);
+
+				half4 normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0);
+				half centerRoughness = 1.0 - normalSmoothness.w;
+			#if defined(_GBUFFER_NORMALS_OCT)
+				half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normalSmoothness.xyz));                // values between [ 0, +1]
+				half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                        // values between [-1, +1]
+				normalSmoothness.xyz = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+			#endif
+				half3 centerNormal = normalSmoothness.xyz;
+
+				// Convert both directions to view space
+				half NdotV = abs(dot(centerNormal, viewDirectionWS));
+
+				// Get the dominant direction
+				half4 dominantWS = GetSpecularDominantDirection(centerNormal, viewDirectionWS, 1.0);
+
+				// Evaluate the blur radius
+				float distanceToCamera = length(positionWS - cameraPositionWS);
+				//half blurRadius = ComputeBlurRadius(1.0, BLUR_MAX_RADIUS) * _ReBlurDenoiserRadius;
+				half blurRadius = BLUR_MAX_RADIUS * _ReBlurDenoiserRadius;
+				//blurRadius *= max(1.0 - saturate(accumulationFactor / MAX_ACCUM_FRAME_NUM), 1.0);
+				//blurRadius *= HitDistanceAttenuation(centerRoughness, distanceToCamera, centerSignal.w);
+				//blurRadius *= lerp(saturate((distanceToCamera - MIN_BLUR_DISTANCE) / BLUR_OUT_RANGE), 0.0, 1.0);
+
+				// Evalute the local basis
+				half2x3 TvBv = GetKernelBasis(dominantWS.xyz, centerNormal, 1.0);
+				TvBv[0] *= blurRadius;
+				TvBv[1] *= blurRadius;
+
+				// Loop through the samples
+				float4 signalSum = 0.0; // requires full precision float
+				float sumWeight = 0.0;
+				for (uint sampleIndex = 0; sampleIndex < POISSON_SAMPLE_COUNT; ++sampleIndex)
+				{
+					// Pick the next sample value
+					half3 offset = k_PoissonDiskSamples[sampleIndex];
+
+					// Evaluate the tap uv
+					float2 uv = GetKernelSampleCoordinates(offset, positionWS, TvBv[0], TvBv[1], _ReBlurBlurRotator);
+
+					// Is the target pixel on the screen?
+					bool isInScreen = uv.x <= 1.0 && uv.x >= 0.0 && uv.y <= 1.0 && uv.y >= 0.0;
+					if (!isInScreen)
+						continue;
+
+					// Sample weights
+					half depthWeight = 1.0;
+					half normalWeight = 1.0;
+					half planeWeight = 1.0;
+					half roughnessWeight = 1.0;
+
+					float sampleDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv, 0).r;
+
+				#if !UNITY_REVERSED_Z
+					sampleDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, sampleDepth);
+				#endif
+
+					float3 samplePositionWS = ComputeWorldSpacePosition(uv, sampleDepth, UNITY_MATRIX_I_VP);
+
+					sampleDepth = Linear01Depth(sampleDepth, _ZBufferParams);
+
+					half4 normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, uv, 0);
+					half sampleRoughness = 1.0 - normalSmoothness.w;
+				#if defined(_GBUFFER_NORMALS_OCT)
+					half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normalSmoothness.xyz));                // values between [ 0, +1]
+					half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                        // values between [-1, +1]
+					normalSmoothness.xyz = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+				#endif
+					half3 sampleNormal = normalSmoothness.xyz;
+
+					depthWeight = max(0.0, 1.0 - abs(sampleDepth - centerDepth));
+
+					const half normalCloseness = sqr(sqr(max(0.0, dot(sampleNormal, centerNormal))));
+					const half normalError = 1.0 - normalCloseness;
+					normalWeight = max(0.0, (1.0 - normalError));
+
+					// Change in position in camera space
+					const float3 dq = positionWS - samplePositionWS;
+
+					// How far away is this point from the original sample
+					// in camera space? (Max value is unbounded)
+					const float distance2 = dot(dq, dq);
+
+					// How far off the expected plane (on the perpendicular) is this point? Max value is unbounded.
+					const float planeError = max(abs(dot(dq, sampleNormal)), abs(dot(dq, centerNormal)));
+
+					planeWeight = (distance2 < 0.0001) ? 1.0 :
+					pow(max(0.0, 1.0 - 2.0 * planeError / sqrt(distance2)), 2.0);
+					
+					roughnessWeight = max(0.0, 1.0 - abs(sampleRoughness - centerRoughness));
+
+					half w = GetGaussianWeight(offset.z);
+					w *= depthWeight * normalWeight * planeWeight * roughnessWeight;
+					w = (sampleDepth != 1.0) && isInScreen ? w : 0.0;
+
+					// Fetch the full resolution depth
+					float4 tapSignal = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, uv, 0);
+					tapSignal = w ? tapSignal : 0.0;
+
+					// Accumulate
+					signalSum += tapSignal * w;
+					sumWeight += w;
+				}
+
+				// Normalize the samples (or the central one if we didn't get any valid samples)
+				signalSum = sumWeight != 0.0 ? signalSum / sumWeight : centerSignal;
+
+				// Normalize the result
+				return signalSum;
 			}
 			ENDHLSL
 		}
