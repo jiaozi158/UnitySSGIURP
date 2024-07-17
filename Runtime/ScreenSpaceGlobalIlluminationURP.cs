@@ -210,6 +210,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private const string _WRITE_RENDERING_LAYERS = "_WRITE_RENDERING_LAYERS";
     private const string _USE_RENDERING_LAYERS = "_USE_RENDERING_LAYERS";
 
+    private static readonly Vector4 m_ScaleBias = new Vector4(1.0f, 1.0f, 0.0f, 0.0f);
+
     public override void Create()
     {
         if (m_Shader != Shader.Find(m_SSGIShaderName))
@@ -309,7 +311,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             isDebuggerLogPrinted = false;
     #endif
 
-        // Per 6 steps: 1 small steps, 2 medium steps, 8-1-2=5 large steps
+        // Per 8 steps: 1 small steps, 2 medium steps, 8-1-2=5 large steps
         bool lowStepCount = ssgiVolume.maxRaySteps.value <= 16;
         int groupsCount = ssgiVolume.maxRaySteps.value / 8;
         int smallSteps = lowStepCount ? 0 : Mathf.Max(groupsCount, 4);
@@ -328,7 +330,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         m_SSGIMaterial.SetFloat(_ReBlurDenoiserRadius, ssgiVolume.denoiserRadiusSS.value * 2.0f);
         m_SSGIMaterial.SetFloat(_IndirectDiffuseLightingMultiplier, ssgiVolume.indirectDiffuseLightingMultiplier.value);
         m_SSGIMaterial.SetFloat(_MaxBrightness, 7.0f);
-        m_SSGIMaterial.SetFloat(_AggressiveDenoise, ssgiVolume.denoiserAlgorithmSS == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive ? 1.0f : 0.0f);
+        m_SSGIMaterial.SetFloat(_AggressiveDenoise, ssgiVolume.denoiserAlgorithmSS.value == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive ? 1.0f : 0.0f);
 
     #if UNITY_2023_1_OR_NEWER
         bool enableRenderingLayers = Shader.IsKeywordEnabled(_WRITE_RENDERING_LAYERS) && ssgiVolume.indirectDiffuseRenderingLayers.value.value != 0xFFFF;
@@ -446,7 +448,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                         if (colorFieldInfo.GetValue(motionVectorPass) is RTHandle motionColorHandle && depthFieldInfo.GetValue(motionVectorPass) is RTHandle motionDepthHandle)
                         {
                             cmd.SetRenderTarget(motionColorHandle, motionDepthHandle);
-                            Blitter.BlitTexture(cmd, motionColorHandle, new Vector4(1.0f, 1.0f, 0.0f, 0.0f), m_SSGIMaterial, pass: 7);
+                            Blitter.BlitTexture(cmd, motionColorHandle, m_ScaleBias, m_SSGIMaterial, pass: 7);
                         }
                     }
                 }
@@ -597,7 +599,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                     // RT-1: accumulated results
                     // RT-2: accumulated sample count
                     cmd.SetRenderTarget(rTHandles, m_AccumulateSampleHandle);
-                    Blitter.BlitTexture(cmd, m_IntermediateDiffuseHandle, new Vector4(1.0f, 1.0f, 0.0f, 0.0f), m_SSGIMaterial, pass: 2);
+                    Blitter.BlitTexture(cmd, m_IntermediateDiffuseHandle, m_ScaleBias, m_SSGIMaterial, pass: 2);
 
                     if (ssgiVolume.denoiserAlgorithmSS.value == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive)
                     {
@@ -845,7 +847,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 // RT-1: accumulated results
                 // RT-2: accumulated sample count
                 cmd.SetRenderTarget(data.rTHandles, data.accumulateSampleHandle);
-                Blitter.BlitTexture(cmd, data.intermediateDiffuseHandle, new Vector4(1.0f, 1.0f, 0.0f, 0.0f), data.ssgiMaterial, pass: 2);
+                Blitter.BlitTexture(cmd, data.intermediateDiffuseHandle, m_ScaleBias, data.ssgiMaterial, pass: 2);
 
 
                 if (data.aggressiveDenoise)
@@ -1072,6 +1074,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             m_HistoryDepthHandle?.Release();
             m_AccumulateSampleHandle?.Release();
             m_AccumulateHistorySampleHandle?.Release();
+            m_HistoryCameraColorHandle?.Release();
         }
 
         Vector4 EvaluateRotator(float rand)

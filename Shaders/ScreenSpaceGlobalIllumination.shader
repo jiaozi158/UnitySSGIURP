@@ -353,7 +353,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 					// Can be replace by clamp() to reduce performance cost.
 					//prevColor = DirectClipToAABB(prevColor, boxMin, boxMax);
-					prevColor = max(clamp(prevColor, boxMin, boxMax), half3(0.0, 0.0, 0.0));
+					prevColor = clamp(prevColor, boxMin, boxMax);
 
 					// We still try to reuse (clamped) history samples even if they are invalid
 					result = (currentColor.rgb * (1.0 - accumulationFactor) + prevColor.rgb * accumulationFactor);
@@ -892,7 +892,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				half4 centerSignal = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0);
 
 				// Number of accumulated frames
-				half accumulationFactor = SAMPLE_TEXTURE2D_X_LOD(_SSGISampleTexture, my_point_clamp_sampler, screenUV, 0).r;
+				//half accumulationFactor = SAMPLE_TEXTURE2D_X_LOD(_SSGISampleTexture, my_point_clamp_sampler, screenUV, 0).r;
 
 				// Evaluate the position and view vectors
 				float3 cameraPositionWS = GetCameraPositionWS();
@@ -908,13 +908,13 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				half3 centerNormal = normalSmoothness.xyz;
 
 				// Convert both directions to view space
-				half NdotV = abs(dot(centerNormal, viewDirectionWS));
+				//half NdotV = abs(dot(centerNormal, viewDirectionWS));
 
 				// Get the dominant direction
 				half4 dominantWS = GetSpecularDominantDirection(centerNormal, viewDirectionWS, 1.0);
 
 				// Evaluate the blur radius
-				float distanceToCamera = length(positionWS - cameraPositionWS);
+				//float distanceToCamera = length(positionWS - cameraPositionWS);
 				//half blurRadius = ComputeBlurRadius(1.0, BLUR_MAX_RADIUS) * _ReBlurDenoiserRadius;
 				half blurRadius = BLUR_MAX_RADIUS * _ReBlurDenoiserRadius;
 				//blurRadius *= max(1.0 - saturate(accumulationFactor / MAX_ACCUM_FRAME_NUM), 1.0);
