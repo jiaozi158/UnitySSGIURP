@@ -43,7 +43,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
 		#endif
 
-			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+			#include "./SSGI.hlsl"
 
 			half4 frag(Varyings input) : SV_Target
 			{
@@ -120,8 +120,8 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
 
-			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIDenoise.hlsl"
-			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+			#include "./SSGIDenoise.hlsl"
+			#include "./SSGI.hlsl"
             
 			half4 frag(Varyings input) : SV_Target
 			{
@@ -144,7 +144,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#endif
 
 				// Start denoising before tracing SSGI
-				// If the history sample for a pixel will be invalid, we sample the reflection probes multiple times and use the results instead.
+				// If the history sample for a pixel will be invalid, we increase the number of samples and reduce ray marching quality.
 
 				// TODO: find a way to calculate it only once. (SSGI pass & Temporal Reprojection pass)
 				float3 positionWS = ComputeWorldSpacePosition(screenUV, depth, UNITY_MATRIX_I_VP);
@@ -193,7 +193,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 					MAX_MEDIUM_STEP = 3;
 					STEP_SIZE = 0.6;
 					MEDIUM_STEP_SIZE = 0.1;
-					RAY_COUNT = 4;
+					RAY_COUNT = max(4, RAY_COUNT);
 				}
 
 				// Set the hit distance to 0
@@ -214,16 +214,19 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 					bool hitSuccessful = rayHit.distance > REAL_EPS;
 
+					// TODO: Move uniform computations to CPU
+					half sampleWeight = rcp(RAY_COUNT);
+
 					UNITY_BRANCH
 					if (hitSuccessful)
 					{
-						lightingDistance.rgb += rayHit.emission * rcp(RAY_COUNT);
-						lightingDistance.a += rayHit.distance * rcp(RAY_COUNT);
+						lightingDistance.rgb += rayHit.emission * sampleWeight;
+						lightingDistance.a += rayHit.distance * sampleWeight;
 					}
 					else
 					{
-						lightingDistance.rgb += SampleReflectionProbes(ray.direction, positionWS, 1.0h, screenUV) * rcp(RAY_COUNT);
-						lightingDistance.a += 1.0 * rcp(RAY_COUNT);
+						lightingDistance.rgb += SampleReflectionProbes(ray.direction, positionWS, 1.0h, screenUV) * sampleWeight;
+						lightingDistance.a += sampleWeight; // 1.0 * sampleWeight
 					}
 				}
 
@@ -257,7 +260,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 			#pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
 
-			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+			#include "./SSGI.hlsl"
 
 			void frag(Varyings input, out half4 denoiseOutput : SV_Target0, out half currentSample : SV_Target1)
 			{
@@ -271,11 +274,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
 				float prevDeviceDepth = SAMPLE_TEXTURE2D_X_LOD(_SSGIHistoryDepthTexture, my_point_clamp_sampler, prevUV, 0).r;
 
-			#if !UNITY_REVERSED_Z
-				deviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, deviceDepth);
-				prevDeviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, prevDeviceDepth);
-			#endif
-
 				half4 normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyzw;
 
 				// Fetch the current and history values and apply the exposition to it.
@@ -288,6 +286,11 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#endif 
 
 				bool isSky = deviceDepth == UNITY_RAW_FAR_CLIP_VALUE? true : false;
+
+			#if !UNITY_REVERSED_Z
+				deviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, deviceDepth);
+				prevDeviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, prevDeviceDepth);
+			#endif
 
 				bool canBeReprojected = true;
 				if (isSky || prevUV.x > 1.0 || prevUV.x < 0.0 || prevUV.y > 1.0 || prevUV.y < 0.0)
@@ -386,7 +389,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 
-			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+			#include "./SSGI.hlsl"
 
 			#pragma vertex Vert
 			#pragma fragment frag
@@ -406,15 +409,15 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 				float centerDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
 
-			#if !UNITY_REVERSED_Z
-				centerDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, centerDepth);
-            #endif
-
 				// If the current pixel is sky
 				bool isBackground = centerDepth == UNITY_RAW_FAR_CLIP_VALUE ? true : false;
 
 				if (isBackground)
 					discard;
+
+			#if !UNITY_REVERSED_Z
+				centerDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, centerDepth);
+            #endif
 
 				centerDepth = LinearEyeDepth(centerDepth, _ZBufferParams);
 
@@ -517,7 +520,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 
-			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+			#include "./SSGI.hlsl"
 
 			#pragma vertex Vert
 			#pragma fragment frag
@@ -538,14 +541,14 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
 
-			#if !UNITY_REVERSED_Z
-				deviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, deviceDepth);
-			#endif
-
 				bool isSky = deviceDepth == UNITY_RAW_FAR_CLIP_VALUE ? true : false;;
 
 				if (isSky || prevUV.x > 1.0 || prevUV.x < 0.0 || prevUV.y > 1.0 || prevUV.y < 0.0)
 					discard;
+
+			#if !UNITY_REVERSED_Z
+				deviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, deviceDepth);
+			#endif
 				
 				// Performance cost here can be reduced by removing less important operations.
 
@@ -654,7 +657,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareRenderingLayerTexture.hlsl"
 		#endif
 
-			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+			#include "./SSGI.hlsl"
 
 			half3 BilateralUpscale(float2 screenUV, float deviceDepth)
 			{
@@ -801,7 +804,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 			#pragma target 3.5
 
-			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+			#include "./SSGI.hlsl"
 
 			half4 frag(Varyings input) : SV_Target
 			{
@@ -859,7 +862,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 
-			#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGI.hlsl"
+			#include "./SSGI.hlsl"
 
 			#pragma vertex Vert
 			#pragma fragment frag
@@ -1005,7 +1008,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				signalSum = sumWeight != 0.0 ? signalSum / sumWeight : centerSignal;
 
 				// Normalize the result
-				return signalSum;
+				return max(signalSum, half4(0.0, 0.0, 0.0, 0.0));
 			}
 			ENDHLSL
 		}

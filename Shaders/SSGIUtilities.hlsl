@@ -29,9 +29,9 @@ void SSGIEvaluateAdaptiveProbeVolume(in float3 posWS, in float3 normalWS, in flo
 #endif
 #endif
 
-#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIConfig.hlsl"
-#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIInput.hlsl"
-#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIFallback.hlsl" // Reflection Probes Sampling
+#include "./SSGIConfig.hlsl"
+#include "./SSGIInput.hlsl"
+#include "./SSGIFallback.hlsl" // Reflection Probes Sampling
 
 void UpdateAmbientSH()
 {

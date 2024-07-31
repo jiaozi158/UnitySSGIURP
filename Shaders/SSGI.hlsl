@@ -1,8 +1,8 @@
 #ifndef URP_SCREEN_SPACE_GLOBAL_ILLUMINATION_HLSL
 #define URP_SCREEN_SPACE_GLOBAL_ILLUMINATION_HLSL
 
-#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIUtilities.hlsl"
-#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIDenoise.hlsl"
+#include "./SSGIUtilities.hlsl"
+#include "./SSGIDenoise.hlsl"
 
 // If no intersection, "rayHit.distance" will remain "REAL_EPS".
 RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)

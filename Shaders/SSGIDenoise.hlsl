@@ -2,8 +2,8 @@
 #define URP_SCREEN_SPACE_GLOBAL_ILLUMINATION_DENOISE_HLSL
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIUtilities.hlsl"
-#include "Packages/com.jiaozi158.unityssgiurp/Shaders/SSGIConfig.hlsl"
+#include "./SSGIUtilities.hlsl"
+#include "./SSGIConfig.hlsl"
 
 half ComputeMaxReprojectionWorldRadius(float3 positionWS, half3 viewDirWS, half3 normalWS, half pixelSpreadAngleTangent, half maxDistance, half pixelTolerance)
 {
