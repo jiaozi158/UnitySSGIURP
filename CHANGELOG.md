@@ -5,6 +5,14 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2024-08-30
+
+### Fixed
+
+- Fixed an issue where the color format of direct lighting texture was incorrect in some cases.
+- Fixed a regression with the deferred shader variants in URP 17.
+
+
 ## [1.0.6] - 2024-08-29
 
 ### Changed

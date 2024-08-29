@@ -736,6 +736,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;
             if (desc.width != renderingData.cameraData.camera.scaledPixelWidth)
                 desc = new RenderTextureDescriptor(renderingData.cameraData.camera.scaledPixelWidth, renderingData.cameraData.camera.scaledPixelHeight);
+            desc.graphicsFormat = GraphicsFormat.B10G11R11_UFloatPack32;
             desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
             desc.stencilFormat = GraphicsFormat.None;
             desc.msaaSamples = 1;
@@ -998,6 +999,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 }
 
                 RenderTextureDescriptor desc = cameraData.cameraTargetDescriptor;
+                desc.graphicsFormat = GraphicsFormat.B10G11R11_UFloatPack32;
                 desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
                 desc.stencilFormat = GraphicsFormat.None;
                 desc.msaaSamples = 1;

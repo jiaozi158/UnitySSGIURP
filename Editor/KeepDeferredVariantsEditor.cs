@@ -13,7 +13,13 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
     public KeepDeferredVariantsEditor() { }
 
     // Use callbackOrder to set when Unity calls this shader preprocessor. Unity starts with the preprocessor that has the lowest callbackOrder value.
-    public int callbackOrder { get { return 99; } }
+
+    // TODO: Test on Unity 2023
+#if UNITY_6000_0_OR_NEWER
+    public int callbackOrder { get { return 0; } }
+#else
+    public int callbackOrder { get { return 99; } } // Unity 2022 LTS
+#endif
 
     const string k_RendererDataList = "m_RendererDataList";
     const string k_SsgiRendererFeature = "ScreenSpaceGlobalIlluminationURP";
