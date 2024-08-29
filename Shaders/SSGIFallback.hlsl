@@ -21,6 +21,7 @@ half3 BoxProjectedDirection(half3 reflectVector, float3 positionWS, float3 probe
 #if UNITY_VERSION < 202330
 
 // Must match: UniversalRenderPipeline.maxVisibleAdditionalLights
+#ifndef MAX_VISIBLE_LIGHTS
 #if defined(SHADER_API_MOBILE) && (defined(SHADER_API_GLES) || defined(SHADER_API_GLES30))
 #define MAX_VISIBLE_LIGHTS 16
 #elif defined(SHADER_API_MOBILE) || (defined(SHADER_API_GLCORE) && !defined(SHADER_API_SWITCH)) || defined(SHADER_API_GLES) || defined(SHADER_API_GLES3) // Workaround because SHADER_API_GLCORE is also defined when SHADER_API_SWITCH is
@@ -29,6 +30,7 @@ half3 BoxProjectedDirection(half3 reflectVector, float3 positionWS, float3 probe
 #define MAX_VISIBLE_LIGHTS 256
 #endif
 
+#endif
 #endif
 
 // Match with values in UniversalRenderPipeline.cs

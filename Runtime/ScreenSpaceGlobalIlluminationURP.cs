@@ -210,6 +210,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private const string _WRITE_RENDERING_LAYERS = "_WRITE_RENDERING_LAYERS";
     private const string _USE_RENDERING_LAYERS = "_USE_RENDERING_LAYERS";
 
+    private const string SSGI_RENDER_GBUFFER = "SSGI_RENDER_GBUFFER";
+
     private static readonly Vector4 m_ScaleBias = new Vector4(1.0f, 1.0f, 0.0f, 0.0f);
 
     public override void Create()
@@ -407,6 +409,11 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         if (!isUsingDeferred)
         {
             renderer.EnqueuePass(m_ForwardGBufferPass);
+            Shader.EnableKeyword(SSGI_RENDER_GBUFFER);
+        }
+        else
+        {
+            Shader.DisableKeyword(SSGI_RENDER_GBUFFER);
         }
     }
     public class PreRenderScreenSpaceGlobalIlluminationPass : ScriptableRenderPass
@@ -582,7 +589,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 if (enableDenoise)
                 {
                     // Render SSGI
-                    Blitter.BlitCameraTexture(cmd, m_IntermediateCameraColorHandle, m_IntermediateDiffuseHandle, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, m_SSGIMaterial, pass: 1);
+                    Blitter.BlitCameraTexture(cmd, m_IntermediateCameraColorHandle, m_IntermediateDiffuseHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, m_SSGIMaterial, pass: 1);
                     m_SSGIMaterial.SetTexture(indirectDiffuseTexture, m_DiffuseHandle);
 
                     // Reproject GI
@@ -633,7 +640,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 else
                 {
                     // SSGI
-                    Blitter.BlitCameraTexture(cmd, m_IntermediateCameraColorHandle, m_DiffuseHandle, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, m_SSGIMaterial, pass: 1);
+                    Blitter.BlitCameraTexture(cmd, m_IntermediateCameraColorHandle, m_DiffuseHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, m_SSGIMaterial, pass: 1);
                     m_SSGIMaterial.SetTexture(indirectDiffuseTexture, m_DiffuseHandle);
 
                     // Update History Depth
@@ -832,7 +839,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             if (data.denoise)
             {
                 // Render SSGI
-                Blitter.BlitCameraTexture(cmd, data.intermediateCameraColorHandle, data.intermediateDiffuseHandle, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, data.ssgiMaterial, pass: 1);
+                Blitter.BlitCameraTexture(cmd, data.intermediateCameraColorHandle, data.intermediateDiffuseHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, data.ssgiMaterial, pass: 1);
                 data.ssgiMaterial.SetTexture(indirectDiffuseTexture, data.diffuseHandle);
 
                 // Reproject GI
@@ -884,7 +891,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             else
             {
                 // SSGI
-                Blitter.BlitCameraTexture(cmd, data.intermediateCameraColorHandle, data.diffuseHandle, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, data.ssgiMaterial, pass: 1);
+                Blitter.BlitCameraTexture(cmd, data.intermediateCameraColorHandle, data.diffuseHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, data.ssgiMaterial, pass: 1);
                 data.ssgiMaterial.SetTexture(indirectDiffuseTexture, data.diffuseHandle);
 
                 // Update History Depth

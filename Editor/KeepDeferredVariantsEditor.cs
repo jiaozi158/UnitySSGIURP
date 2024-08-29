@@ -13,7 +13,7 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
     public KeepDeferredVariantsEditor() { }
 
     // Use callbackOrder to set when Unity calls this shader preprocessor. Unity starts with the preprocessor that has the lowest callbackOrder value.
-    public int callbackOrder { get { return 0; } }
+    public int callbackOrder { get { return 99; } }
 
     const string k_RendererDataList = "m_RendererDataList";
     const string k_SsgiRendererFeature = "ScreenSpaceGlobalIlluminationURP";
@@ -82,10 +82,10 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
             {
                 // Get the current renderer list
                 var oldRendererList = (ScriptableRendererData[])fieldInfo.GetValue(urpAsset);
-
+                
                 var newRendererList = new ScriptableRendererData[oldRendererList.Length - 1];
                 int index = 0;
-                for (int i = 0; i < oldRendererList.Length; i++)
+                for (int i = 0; i < oldRendererList.Length - 1; i++)
                 {
                     if (oldRendererList[i] != null)
                     {
@@ -96,6 +96,8 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
                 // Set the renderer list back to the URP Asset
                 fieldInfo.SetValue(urpAsset, newRendererList);
             }
+
+            isTemporaryRendererAdded = false;
         }
     }
 
