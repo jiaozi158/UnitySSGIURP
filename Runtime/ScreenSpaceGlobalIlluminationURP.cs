@@ -126,6 +126,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     // Avoid printing messages every frame
     private bool isShaderMismatchLogPrinted = false;
     private bool isDebuggerLogPrinted = false;
+    private bool isBackfaceLightingLogPrinted = false;
 
     // SSGI Shader Property IDs
     private static readonly int _MaxSteps = Shader.PropertyToID("_MaxSteps");
@@ -204,13 +205,17 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private static readonly int shBb = Shader.PropertyToID("ssgi_SHBb");
     private static readonly int shC = Shader.PropertyToID("ssgi_SHC");
 
+    // Local Keywords
     private const string _FP_REFL_PROBE_ATLAS = "_FP_REFL_PROBE_ATLAS";
     private const string _BACKFACE_TEXTURES = "_BACKFACE_TEXTURES";
     private const string _FORWARD_PLUS = "_FORWARD_PLUS";
     private const string _WRITE_RENDERING_LAYERS = "_WRITE_RENDERING_LAYERS";
     private const string _USE_RENDERING_LAYERS = "_USE_RENDERING_LAYERS";
 
+    // Global Keywords
     private const string SSGI_RENDER_GBUFFER = "SSGI_RENDER_GBUFFER";
+    private const string SSGI_RENDER_BACKFACE_DEPTH = "SSGI_RENDER_BACKFACE_DEPTH";
+    private const string SSGI_RENDER_BACKFACE_COLOR = "SSGI_RENDER_BACKFACE_COLOR";
 
     private static readonly Vector4 m_ScaleBias = new Vector4(1.0f, 1.0f, 0.0f, 0.0f);
 
@@ -253,8 +258,6 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             m_BackfaceDataPass = new BackfaceDataPass();
             m_BackfaceDataPass.renderPassEvent = RenderPassEvent.AfterRenderingOpaques - 1;
         }
-
-        m_BackfaceDataPass.backfaceLighting = m_BackfaceLighting;
 
         if (m_ForwardGBufferPass == null)
         {
@@ -383,26 +386,49 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         if (renderingData.cameraData.camera.cameraType != CameraType.Preview && (!isDebugger || m_RenderingDebugger))
             renderer.EnqueuePass(m_SSGIPass);
 
-        bool renderBackfaceData = ssgiVolume.thicknessMode.value != ScreenSpaceGlobalIlluminationVolume.ThicknessMode.Constant;
-        if (renderBackfaceData)
-        {
-            renderer.EnqueuePass(m_BackfaceDataPass);
-            m_SSGIMaterial.EnableKeyword(_BACKFACE_TEXTURES);
-            if (!m_BackfaceLighting)
-                m_SSGIMaterial.SetFloat(_BackDepthEnabled, 1.0f); // Depth
-            else
-                m_SSGIMaterial.SetFloat(_BackDepthEnabled, 2.0f); // Depth + Color
-        }
-        else
-        {
-            m_SSGIMaterial.DisableKeyword(_BACKFACE_TEXTURES);
-            m_SSGIMaterial.SetFloat(_BackDepthEnabled, 0.0f);
-        }
-
         // If GBuffer exists, URP is in Deferred path. (Actual rendering mode can be different from settings, such as URP forces Forward on OpenGL)
         bool isUsingDeferred = gBufferFieldInfo.GetValue(renderer) != null;
         // OpenGL won't use deferred path.
         isUsingDeferred &= (SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES3) & (SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLCore);  // GLES 2 is deprecated.
+
+        bool renderBackfaceData = ssgiVolume.thicknessMode.value != ScreenSpaceGlobalIlluminationVolume.ThicknessMode.Constant;
+        if (renderBackfaceData)
+        {
+            // Backface lighting is only supported on Forward(+) rendering path.
+            bool supportBackfaceLighting = m_BackfaceLighting && !isUsingDeferred;
+            m_BackfaceDataPass.backfaceLighting = supportBackfaceLighting;
+
+            renderer.EnqueuePass(m_BackfaceDataPass);
+
+            m_SSGIMaterial.EnableKeyword(_BACKFACE_TEXTURES);
+            Shader.EnableKeyword(SSGI_RENDER_BACKFACE_DEPTH);
+            if (supportBackfaceLighting)
+            {
+                m_SSGIMaterial.SetFloat(_BackDepthEnabled, 2.0f); // Depth + Color
+                Shader.EnableKeyword(SSGI_RENDER_BACKFACE_COLOR);
+            }
+            else
+            {
+                m_SSGIMaterial.SetFloat(_BackDepthEnabled, 1.0f); // Depth
+                Shader.DisableKeyword(SSGI_RENDER_BACKFACE_COLOR);
+            }
+        }
+        else
+        {
+            m_SSGIMaterial.DisableKeyword(_BACKFACE_TEXTURES);
+            Shader.DisableKeyword(SSGI_RENDER_BACKFACE_DEPTH);
+            Shader.DisableKeyword(SSGI_RENDER_BACKFACE_COLOR);
+            m_SSGIMaterial.SetFloat(_BackDepthEnabled, 0.0f);
+        }
+
+    #if UNITY_EDITOR || DEBUG
+        if (m_BackfaceLighting && isUsingDeferred)
+        {
+            if (!isBackfaceLightingLogPrinted) { Debug.LogError("Screen Space Global Illumination URP: Backface Lighting is only supported on Forward(+) rendering path."); isBackfaceLightingLogPrinted = true; }
+        }
+        else
+            isBackfaceLightingLogPrinted = false;
+    #endif
 
         // Render Forward GBuffer pass if the current device supports MRT.
         // Assuming the current device supports at least 4 MRTs since we require Unity shader model 3.5
@@ -720,19 +746,6 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 m_SSGIMaterial.SetVector(shC, new Vector4(ambientProbe[0, 8], ambientProbe[1, 8], ambientProbe[2, 8], 1));
             }
 
-            // Avoid reprojecting from uninitialized history texture
-            if (isHistoryTextureValid)
-            {
-                m_SSGIMaterial.SetFloat(_HistoryTextureValid, 1.0f);
-                m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_HistoryCameraColorHandle);
-            }
-            else
-            {
-                m_SSGIMaterial.SetFloat(_HistoryTextureValid, 0.0f);
-                m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_IntermediateCameraColorHandle);
-                isHistoryTextureValid = true;
-            }
-
             RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;
             if (desc.width != renderingData.cameraData.camera.scaledPixelWidth)
                 desc = new RenderTextureDescriptor(renderingData.cameraData.camera.scaledPixelWidth, renderingData.cameraData.camera.scaledPixelHeight);
@@ -756,6 +769,18 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         #else
             RenderingUtils.ReAllocateIfNeeded(ref m_HistoryCameraColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: _SSGIHistoryCameraColorTexture);
         #endif
+
+            // Avoid reprojecting from uninitialized history texture
+            if (isHistoryTextureValid)
+            {
+                m_SSGIMaterial.SetFloat(_HistoryTextureValid, 1.0f);
+                m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_HistoryCameraColorHandle);
+            }
+            else
+            {
+                m_SSGIMaterial.SetFloat(_HistoryTextureValid, 0.0f);
+                isHistoryTextureValid = true;
+            }
 
             desc.graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat;
             depthDesc.colorFormat = RenderTextureFormat.RFloat;
@@ -985,19 +1010,6 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                     m_SSGIMaterial.SetVector(shC, new Vector4(ambientProbe[0, 8], ambientProbe[1, 8], ambientProbe[2, 8], 1));
                 }
 
-                // Avoid reprojecting from uninitialized history texture
-                if (isHistoryTextureValid)
-                {
-                    m_SSGIMaterial.SetFloat(_HistoryTextureValid, 1.0f);
-                    m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_HistoryCameraColorHandle);
-                }
-                else
-                {
-                    m_SSGIMaterial.SetFloat(_HistoryTextureValid, 0.0f);
-                    m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_IntermediateCameraColorHandle);
-                    isHistoryTextureValid = true;
-                }
-
                 RenderTextureDescriptor desc = cameraData.cameraTargetDescriptor;
                 desc.graphicsFormat = GraphicsFormat.B10G11R11_UFloatPack32;
                 desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
@@ -1020,6 +1032,18 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 TextureHandle historyCameraColorHandle = renderGraph.ImportTexture(m_HistoryCameraColorHandle);
                 passData.historyCameraColorHandle = historyCameraColorHandle;
                 builder.UseTexture(historyCameraColorHandle, AccessFlags.ReadWrite);
+
+                // Avoid reprojecting from uninitialized history texture
+                if (isHistoryTextureValid)
+                {
+                    m_SSGIMaterial.SetFloat(_HistoryTextureValid, 1.0f);
+                    m_SSGIMaterial.SetTexture(ssgiHistoryCameraColorTexture, m_HistoryCameraColorHandle);
+                }
+                else
+                {
+                    m_SSGIMaterial.SetFloat(_HistoryTextureValid, 0.0f);
+                    isHistoryTextureValid = true;
+                }
 
                 depthDesc.colorFormat = RenderTextureFormat.RFloat;
                 //depthDesc.graphicsFormat = GraphicsFormat.None;

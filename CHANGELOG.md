@@ -5,6 +5,21 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2024-08-30
+
+### Added
+
+- Added three global shader keywords to indicate the state of resources created by SSGI:
+  - `SSGI_RENDER_GBUFFER`
+  - `SSGI_RENDER_BACKFACE_DEPTH`
+  - `SSGI_RENDER_BACKFACE_COLOR`
+
+### Fixed
+
+- Fixed an issue where the history texture was set before allocation.
+- Fixed an issue with **Backface Lighting** when using the Deferred rendering path.
+
+
 ## [1.0.7] - 2024-08-30
 
 ### Fixed

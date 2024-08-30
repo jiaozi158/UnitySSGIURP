@@ -111,22 +111,14 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
         sceneBackDepth = LinearEyeDepth(deviceBackDepth, _ZBufferParams);
 
         backDepthValid = (deviceBackDepth != UNITY_RAW_FAR_CLIP_VALUE) && (sceneBackDepth >= sceneDepth);
-
-        if (backDepthValid)
-            backDepthDiff = hitDepth - sceneBackDepth;
-        else
-            backDepthDiff = depthDiff - marchingThickness;
+        backDepthDiff = backDepthValid ? (hitDepth - sceneBackDepth) : (depthDiff - marchingThickness);
     #endif
 
         // Binary Search Sign is used to flip the ray marching direction.
         // Sign is positive : ray is in front of the actual intersection.
         // Sign is negative : ray is behind the actual intersection.
-        half Sign;
         bool isBackSearch = (!isFrontRay && hitDepth > sceneBackDepth && backDepthValid);
-        if (isBackSearch)
-            Sign = FastSign(backDepthDiff);
-        else
-            Sign = FastSign(depthDiff);
+        half Sign = isBackSearch ? FastSign(backDepthDiff) : FastSign(depthDiff);
 
         // Disable binary search:
         // 1. The ray points to the camera plane, but is in front of all objects.
@@ -190,9 +182,8 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
         else if (!startBinarySearch)
         {
             // As the distance increases, the accuracy of ray intersection test becomes less important.
-            half multiplier = 1.0;
-            currStepSize = (currStepSize + currStepSize * 0.1) * multiplier;
-            marchingThickness += MARCHING_THICKNESS * 0.25 * multiplier;
+            currStepSize += currStepSize * 0.1;
+            marchingThickness += MARCHING_THICKNESS * 0.25;
         }
 
         // Update last step's depth difference.
