@@ -27,6 +27,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     [Header("Performance")]
     [Tooltip("Specifies if URP computes screen space global illumination in both real-time and baked reflection probes. \nScreen space global illumination in real-time reflection probes may reduce performace.")]
     [SerializeField] private bool m_ReflectionProbes = true;
+    [Tooltip("Enables high-quality upscaling for screen space global illumination. \nThis may impact performance.")]
+    [SerializeField] private bool m_HighQualityUpscaling = false;
 
     [Header("Lighting")]
     [Tooltip("Specifies if screen space global illumination overrides ambient lighting. \nThis ensures the accuracy of indirect lighting from SSGI.")]
@@ -84,6 +86,15 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether to enable high-quality upscaling for screen space global illumination.
+    /// </summary>
+    public bool HighQualityUpscaling
+    {
+        get { return m_HighQualityUpscaling; }
+        set { m_HighQualityUpscaling = value; }
+    }
+
+    /// <summary>
     /// Gets or sets a value indicating whether screen space global illumination overrides ambient lighting.
     /// </summary>
     /// <remarks>
@@ -96,7 +107,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     }
 
     /// <summary>
-    /// Renders back-face lighting when using automatic thickness mode. This improves accuracy in some cases, but may severely impact performance.
+    /// Renders back-face lighting when using automatic thickness mode.
     /// </summary>
     /// <remarks>
     /// This improves accuracy in some cases, but may severely impact performance.
@@ -133,6 +144,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private static readonly int _MaxSmallSteps = Shader.PropertyToID("_MaxSmallSteps");
     private static readonly int _MaxMediumSteps = Shader.PropertyToID("_MaxMediumSteps");
     private static readonly int _Thickness = Shader.PropertyToID("_Thickness");
+    private static readonly int _Thickness_Increment = Shader.PropertyToID("_Thickness_Increment");
     private static readonly int _StepSize = Shader.PropertyToID("_StepSize");
     private static readonly int _SmallStepSize = Shader.PropertyToID("_SmallStepSize");
     private static readonly int _MediumStepSize = Shader.PropertyToID("_MediumStepSize");
@@ -211,11 +223,15 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private const string _FORWARD_PLUS = "_FORWARD_PLUS";
     private const string _WRITE_RENDERING_LAYERS = "_WRITE_RENDERING_LAYERS";
     private const string _USE_RENDERING_LAYERS = "_USE_RENDERING_LAYERS";
+    private const string _DEPTH_NORMALS_UPSCALE = "_DEPTH_NORMALS_UPSCALE";
 
     // Global Keywords
     private const string SSGI_RENDER_GBUFFER = "SSGI_RENDER_GBUFFER";
     private const string SSGI_RENDER_BACKFACE_DEPTH = "SSGI_RENDER_BACKFACE_DEPTH";
     private const string SSGI_RENDER_BACKFACE_COLOR = "SSGI_RENDER_BACKFACE_COLOR";
+
+    // From "SSGIDenoise.hlsl"
+    private const float k_BlurMaxRadius = 0.04f;
 
     private static readonly Vector4 m_ScaleBias = new Vector4(1.0f, 1.0f, 0.0f, 0.0f);
 
@@ -320,19 +336,20 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         bool lowStepCount = ssgiVolume.maxRaySteps.value <= 16;
         int groupsCount = ssgiVolume.maxRaySteps.value / 8;
         int smallSteps = lowStepCount ? 0 : Mathf.Max(groupsCount, 4);
-        int mediumSteps = lowStepCount ? smallSteps + groupsCount : smallSteps + groupsCount * 2;
+        int mediumSteps = lowStepCount ? groupsCount + 2 : smallSteps + groupsCount * 2;
 
         // TODO: Expose more settings
         m_SSGIMaterial.SetFloat(_MaxSteps, ssgiVolume.maxRaySteps.value);
         m_SSGIMaterial.SetFloat(_MaxSmallSteps, smallSteps);
         m_SSGIMaterial.SetFloat(_MaxMediumSteps, mediumSteps);
-        m_SSGIMaterial.SetFloat(_StepSize, 0.4f);
-        m_SSGIMaterial.SetFloat(_SmallStepSize, smallSteps < 4 ? 0.05f : 0.005f);
+        m_SSGIMaterial.SetFloat(_StepSize, lowStepCount ? 0.5f : 0.4f);
+        m_SSGIMaterial.SetFloat(_SmallStepSize, smallSteps < 4 ? 0.05f : 0.015f);
         m_SSGIMaterial.SetFloat(_MediumStepSize, lowStepCount ? 0.1f : 0.05f);
         m_SSGIMaterial.SetFloat(_Thickness, ssgiVolume.depthBufferThickness.value);
+        m_SSGIMaterial.SetFloat(_Thickness_Increment, ssgiVolume.depthBufferThickness.value * 0.25f);
         m_SSGIMaterial.SetFloat(_RayCount, ssgiVolume.sampleCount.value);
         m_SSGIMaterial.SetFloat(_TemporalIntensity, ssgiVolume.denoiseIntensitySS.value);
-        m_SSGIMaterial.SetFloat(_ReBlurDenoiserRadius, ssgiVolume.denoiserRadiusSS.value * 2.0f);
+        m_SSGIMaterial.SetFloat(_ReBlurDenoiserRadius, ssgiVolume.denoiserRadiusSS.value * 2.0f * k_BlurMaxRadius); // Optimized for roughness = 1.0
         m_SSGIMaterial.SetFloat(_IndirectDiffuseLightingMultiplier, ssgiVolume.indirectDiffuseLightingMultiplier.value);
         m_SSGIMaterial.SetFloat(_MaxBrightness, 7.0f);
         m_SSGIMaterial.SetFloat(_AggressiveDenoise, ssgiVolume.denoiserAlgorithmSS.value == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive ? 1.0f : 0.0f);
@@ -364,6 +381,11 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
         if (renderingData.cameraData.camera.cameraType == CameraType.Reflection) { m_SSGIMaterial.SetFloat(_IsProbeCamera, 1.0f); }
         else { m_SSGIMaterial.SetFloat(_IsProbeCamera, 0.0f); }
+
+        if (m_HighQualityUpscaling)
+            m_SSGIMaterial.EnableKeyword(_DEPTH_NORMALS_UPSCALE);
+        else
+            m_SSGIMaterial.DisableKeyword(_DEPTH_NORMALS_UPSCALE);
 
     #if UNITY_EDITOR
         // [Editor Only] Motion vectors in scene view don't get updated each frame when not entering play mode.
@@ -447,7 +469,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         /// Motion vectors may not render correctly in the scene view
         /// This pass is used to "fix" camera motion vectors to improve scene view denoising
 
-        const string m_ProfilerTag = "Prepare Screen Space Global Illumination";
+        private const string m_ProfilerTag = "Prepare Screen Space Global Illumination";
+        private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
 
         public Material m_SSGIMaterial;
 
@@ -466,7 +489,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         {
             CommandBuffer cmd = CommandBufferPool.Get();
             // Fix scene view motion vectors
-            using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
                 cmd.SetGlobalMatrix(_PrevViewProjMatrix, prevCamVPMatrix);
                 cmd.SetGlobalMatrix(_NonJitteredViewProjMatrix, camVPMatrix);
@@ -558,7 +581,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
     public class ScreenSpaceGlobalIlluminationPass : ScriptableRenderPass
     {
-        const string m_ProfilerTag = "Screen Space Global Illumination";
+        private const string m_ProfilerTag = "Screen Space Global Illumination";
+        private ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
 
         public ScreenSpaceGlobalIlluminationVolume ssgiVolume;
         public bool enableRenderingLayers;
@@ -603,7 +627,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             RTHandle colorHandle = renderingData.cameraData.renderer.cameraColorTargetHandle;
 
             CommandBuffer cmd = CommandBufferPool.Get();
-            using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
                 // Copy Direct Lighting
                 if (overrideAmbientLighting)
@@ -657,7 +681,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                     cmd.CopyTexture(m_DiffuseHandle, m_HistoryIndirectDiffuseHandle);
 
                     // Update History Depth
-                    Blitter.BlitCameraTexture(cmd, m_HistoryDepthHandle, m_HistoryDepthHandle, m_SSGIMaterial, pass: 5);
+                    Blitter.BlitCameraTexture(cmd, m_HistoryDepthHandle, m_HistoryDepthHandle, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, m_SSGIMaterial, pass: 5);
 
                     // Update History sample count
                     //Blitter.BlitCameraTexture(cmd, m_AccumulateSampleHandle, m_AccumulateHistorySampleHandle);
@@ -670,14 +694,14 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                     m_SSGIMaterial.SetTexture(indirectDiffuseTexture, m_DiffuseHandle);
 
                     // Update History Depth
-                    Blitter.BlitCameraTexture(cmd,m_HistoryDepthHandle, m_HistoryDepthHandle, m_SSGIMaterial, pass: 5);
+                    Blitter.BlitCameraTexture(cmd,m_HistoryDepthHandle, m_HistoryDepthHandle, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, m_SSGIMaterial, pass: 5);
                 }
 
                 // Combine
                 Blitter.BlitCameraTexture(cmd, m_IntermediateCameraColorHandle, colorHandle, m_SSGIMaterial, pass: 6);
 
                 // Copy History Scene Color
-                Blitter.BlitCameraTexture(cmd, colorHandle, m_HistoryCameraColorHandle);
+                Blitter.BlitCameraTexture(cmd, colorHandle, m_HistoryCameraColorHandle, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, m_SSGIMaterial, pass: 9);
             }
             context.ExecuteCommandBuffer(cmd);
             cmd.Clear();
@@ -699,14 +723,17 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             frameCount += 33;
             frameCount %= 64000;
 
+            int width = (int)(camera.scaledPixelWidth * renderingData.cameraData.renderScale);
+            int height = (int)(camera.scaledPixelHeight * renderingData.cameraData.renderScale);
+
             bool denoiseStateChanged = ssgiVolume.denoiseSS.value && !enableDenoise;
             bool resolutionStateChanged = ssgiVolume.fullResolutionSS.value ? resolutionScale != 1.0f : ssgiVolume.resolutionScaleSS.value != resolutionScale;
-            resolutionStateChanged |= (historyCameraScaledWidth != camera.scaledPixelWidth) || (historyCameraScaledHeight != camera.scaledPixelHeight);
+            resolutionStateChanged |= (historyCameraScaledWidth != width) || (historyCameraScaledHeight != height);
             if (denoiseStateChanged || resolutionStateChanged)
                 isHistoryTextureValid = false;
 
-            historyCameraScaledWidth = camera.scaledPixelWidth;
-            historyCameraScaledHeight = camera.scaledPixelHeight;
+            historyCameraScaledWidth = width;
+            historyCameraScaledHeight = height;
 
             resolutionScale = ssgiVolume.fullResolutionSS.value ? 1.0f : ssgiVolume.resolutionScaleSS.value;
             m_SSGIMaterial.SetFloat(downSample, resolutionScale);
@@ -747,8 +774,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             }
 
             RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;
-            if (desc.width != renderingData.cameraData.camera.scaledPixelWidth)
-                desc = new RenderTextureDescriptor(renderingData.cameraData.camera.scaledPixelWidth, renderingData.cameraData.camera.scaledPixelHeight);
+            if (desc.width != width)
+                desc = new RenderTextureDescriptor(width, height);
             desc.graphicsFormat = GraphicsFormat.B10G11R11_UFloatPack32;
             desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
             desc.stencilFormat = GraphicsFormat.None;
@@ -958,14 +985,17 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 frameCount += 33;
                 frameCount %= 64000;
 
+                int width = (int)(camera.scaledPixelWidth * cameraData.renderScale);
+                int height = (int)(camera.scaledPixelHeight * cameraData.renderScale);
+
                 bool denoiseStateChanged = ssgiVolume.denoiseSS.value && !enableDenoise;
                 bool resolutionStateChanged = ssgiVolume.fullResolutionSS.value ? resolutionScale != 1.0f : ssgiVolume.resolutionScaleSS.value != resolutionScale;
                 resolutionStateChanged |= (historyCameraScaledWidth != camera.scaledPixelWidth) || (historyCameraScaledHeight != camera.scaledPixelHeight);
                 if (denoiseStateChanged || resolutionStateChanged)
                     isHistoryTextureValid = false;
 
-                historyCameraScaledWidth = camera.scaledPixelWidth;
-                historyCameraScaledHeight = camera.scaledPixelHeight;
+                historyCameraScaledWidth = width;
+                historyCameraScaledHeight = height;
 
                 resolutionScale = ssgiVolume.fullResolutionSS.value ? 1.0f : ssgiVolume.resolutionScaleSS.value;
                 m_SSGIMaterial.SetFloat(downSample, resolutionScale);
@@ -1199,6 +1229,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     public class BackfaceDataPass : ScriptableRenderPass
     {
         const string m_ProfilerTag = "Render Backface Data";
+        private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
 
         private RTHandle m_BackDepthHandle;
         private RTHandle m_BackColorHandle;
@@ -1229,7 +1260,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             #else
                 RenderingUtils.ReAllocateIfNeeded(ref m_BackDepthHandle, depthDesc, FilterMode.Point, TextureWrapMode.Clamp, name: _CameraBackDepthTexture);
             #endif
-                cmd.SetGlobalTexture(_CameraBackDepthTexture, m_BackDepthHandle);
+                cmd.SetGlobalTexture(cameraBackDepthTexture, m_BackDepthHandle);
 
                 ConfigureTarget(m_BackDepthHandle, m_BackDepthHandle);
                 ConfigureClear(ClearFlag.Depth, Color.clear);
@@ -1249,8 +1280,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 RenderingUtils.ReAllocateIfNeeded(ref m_BackDepthHandle, depthDesc, FilterMode.Point, TextureWrapMode.Clamp, name: _CameraBackDepthTexture);
             #endif
 
-                cmd.SetGlobalTexture(_CameraBackDepthTexture, m_BackDepthHandle);
-                cmd.SetGlobalTexture(_CameraBackOpaqueTexture, m_BackColorHandle);
+                cmd.SetGlobalTexture(cameraBackDepthTexture, m_BackDepthHandle);
+                cmd.SetGlobalTexture(cameraBackOpaqueTexture, m_BackColorHandle);
 
                 ConfigureTarget(m_BackColorHandle, m_BackDepthHandle);
                 ConfigureClear(ClearFlag.Color | ClearFlag.Depth, Color.clear);
@@ -1264,7 +1295,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             // Render backface depth
             if (!backfaceLighting)
             {
-                using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+                using (new ProfilingScope(cmd, m_ProfilingSampler))
                 {
                     RendererListDesc rendererListDesc = new RendererListDesc(depthOnly, renderingData.cullResults, renderingData.cameraData.camera);
                     m_DepthRenderStateBlock.depthState = new DepthState(true, CompareFunction.LessEqual);
@@ -1282,7 +1313,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             // Render backface depth + color
             else
             {
-                using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+                using (new ProfilingScope(cmd, m_ProfilingSampler))
                 {
                     m_LitTags[0] = universalForward;
                     m_LitTags[1] = universalForwardOnly;
@@ -1422,7 +1453,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
     public class ForwardGBufferPass : ScriptableRenderPass
     {
-        const string m_ProfilerTag = "Render Forward GBuffer";
+        private const string m_ProfilerTag = "Render Forward GBuffer";
+        private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
 
         private List<ShaderTagId> m_ShaderTagIdList = new List<ShaderTagId>();
         private FilteringSettings m_filter;
@@ -1475,7 +1507,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             SortingCriteria sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
 
             CommandBuffer cmd = CommandBufferPool.Get();
-            using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
                 RendererListDesc rendererListDesc = new RendererListDesc(m_ShaderTagIdList[0], renderingData.cullResults, renderingData.cameraData.camera);
                 rendererListDesc.stateBlock = m_RenderStateBlock;

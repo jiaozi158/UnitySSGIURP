@@ -19,14 +19,14 @@ half ComputeMaxReprojectionWorldRadius(float3 positionWS, half3 viewDirWS, half3
 
 // From Playdead's TAA
 // (half version of HDRP impl)
-half3 SampleColorPoint(Texture2D _BlitTexture, float2 uv, float2 texelOffset)
+half3 SampleColorPoint(float2 uv, float2 texelOffset)
 {
     return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, uv + _BlitTexture_TexelSize.xy * texelOffset, 0).xyz;
 }
 
 void AdjustColorBox(inout half3 boxMin, inout half3 boxMax, inout half3 moment1, inout half3 moment2, float2 uv, half currX, half currY)
 {
-    half3 color = SampleColorPoint(_BlitTexture, uv, float2(currX, currY));
+    half3 color = SampleColorPoint(uv, float2(currX, currY));
     boxMin = min(color, boxMin);
     boxMax = max(color, boxMax);
     moment1 += color;
@@ -70,6 +70,14 @@ half GetSpecularDominantFactor(half NoV, half linearRoughness)
 	return saturate(dominantFactor);
 }
 
+// Optimized for roughness = 1.0
+half GetSpecularDominantFactor(half NoV)
+{
+	half a = 0.298475 * log(39.4115 - 39.0029 * 1.0);
+	half dominantFactor = pow(saturate(1.0 - NoV), 10.8649) * (1.0 - a) + a;
+	return saturate(dominantFactor);
+}
+
 half3 GetSpecularDominantDirectionWithFactor(half3 N, half3 V, half dominantFactor)
 {
 	half3 R = reflect(-V, N);
@@ -82,6 +90,15 @@ half4 GetSpecularDominantDirection(half3 N, half3 V, half linearRoughness)
 {
 	half NoV = abs(dot(N, V));
 	half dominantFactor = GetSpecularDominantFactor(NoV, linearRoughness);
+
+	return half4(GetSpecularDominantDirectionWithFactor(N, V, dominantFactor), dominantFactor);
+}
+
+// Optimized for roughness = 1.0
+half4 GetSpecularDominantDirection(half3 N, half3 V)
+{
+	half NoV = abs(dot(N, V));
+	half dominantFactor = GetSpecularDominantFactor(NoV);
 
 	return half4(GetSpecularDominantDirectionWithFactor(N, V, dominantFactor), dominantFactor);
 }
@@ -112,6 +129,21 @@ half2x3 GetKernelBasis(half3 V, half3 N, half linearRoughness)
 	return half2x3(T, B);
 }
 
+// Optimized for roughness = 1.0
+half2x3 GetKernelBasis(half3 V, half3 N)
+{
+	half3x3 basis = GetLocalFrame(N);
+	half3 T = basis[0];
+	half3 B = basis[1];
+	half NoV = abs(dot(N, V));
+	half f = GetSpecularDominantFactor(NoV);
+	half3 R = reflect(-V, N);
+	half3 D = normalize(lerp(N, R, f));
+	half NoD = abs(dot(N, D));
+
+	return half2x3(T, B);
+}
+
 #define POISSON_SAMPLE_COUNT 8
 static const half3 k_PoissonDiskSamples[POISSON_SAMPLE_COUNT] =
 {
@@ -130,6 +162,18 @@ half GetGaussianWeight(half r)
 {
 	return exp(-0.66 * r * r); // assuming r is normalized to 1
 }
+
+static const half k_GaussianWeight[POISSON_SAMPLE_COUNT] =
+{
+	GetGaussianWeight(k_PoissonDiskSamples[0].z),
+	GetGaussianWeight(k_PoissonDiskSamples[1].z),
+	GetGaussianWeight(k_PoissonDiskSamples[2].z),
+	GetGaussianWeight(k_PoissonDiskSamples[3].z),
+	GetGaussianWeight(k_PoissonDiskSamples[4].z),
+	GetGaussianWeight(k_PoissonDiskSamples[5].z),
+	GetGaussianWeight(k_PoissonDiskSamples[6].z),
+	GetGaussianWeight(k_PoissonDiskSamples[7].z)
+};
 
 half GetSpecularLobeHalfAngle(half linearRoughness, half percentOfVolume = 0.75)
 {

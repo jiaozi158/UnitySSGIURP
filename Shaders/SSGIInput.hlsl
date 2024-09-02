@@ -24,7 +24,7 @@ TEXTURE2D_X_HALF(_GBuffer1); // specular.rgb + oclusion.a
 TEXTURE2D_X_HALF(_GBuffer2); // normalWS.rgb + smoothness.a
 // _GBuffer3                 // indirectLighting.rgb (B10G11R11 / R16G16B16A16)
 
-TEXTURE2D_X(_CameraBackDepthTexture);
+TEXTURE2D_X_FLOAT(_CameraBackDepthTexture);
 SAMPLER(sampler_CameraBackDepthTexture);
 
 TEXTURE2D_X_HALF(_CameraBackOpaqueTexture);
@@ -97,7 +97,7 @@ float4 _MotionVectorTexture_TexelSize;
 TEXTURE2D_X(_HistoryIndirectDiffuseTexture);
 TEXTURE2D_X(_SSGISampleTexture);
 TEXTURE2D_X(_SSGIHistorySampleTexture);
-TEXTURE2D_X(_SSGIHistoryDepthTexture);
+TEXTURE2D_X_FLOAT(_SSGIHistoryDepthTexture);
 TEXTURE2D_X(_IndirectDiffuseTexture);
 TEXTURE2D_X(_SSGIHistoryCameraColorTexture);
 float4 _IndirectDiffuseTexture_TexelSize;
@@ -116,6 +116,7 @@ half _MaxMediumSteps;
 half _MaxSmallSteps;
 half _HistoryTextureValid;
 half _Thickness;
+half _Thickness_Increment;
 
 float4x4 _PrevInvViewProjMatrix;
 float3 _PrevCameraPositionWS;

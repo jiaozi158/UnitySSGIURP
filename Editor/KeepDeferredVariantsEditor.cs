@@ -18,7 +18,7 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
 #if UNITY_6000_0_OR_NEWER
     public int callbackOrder { get { return 0; } }
 #else
-    public int callbackOrder { get { return 99; } } // Unity 2022 LTS
+    public int callbackOrder { get { return 1; } } // Unity 2022 LTS
 #endif
 
     const string k_RendererDataList = "m_RendererDataList";

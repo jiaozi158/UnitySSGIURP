@@ -33,28 +33,22 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
 
     bool startBinarySearch = false;
 
-    // Adaptive Ray Marching
-    // Near: Use smaller step size to improve accuracy.
-    // Far:  Use larger step size to fill the scene.
-    bool activeSamplingSmall = true;
-    bool activeSamplingMedium = true;
-
     bool isBackBuffer = false;
 
     UNITY_LOOP
     for (int i = 1; i <= MAX_STEP; i++)
     {
-        UNITY_BRANCH
-        if (i > MAX_SMALL_STEP && i <= MAX_MEDIUM_STEP && activeSamplingSmall)
+        // Adaptive Ray Marching
+        // Near: Use smaller step size to improve accuracy.
+        // Far:  Use larger step size to fill the scene.
+        if (i > MAX_SMALL_STEP && i <= MAX_MEDIUM_STEP)
         {
-            activeSamplingSmall = false;
             currStepSize = (startBinarySearch) ? currStepSize : MEDIUM_STEP_SIZE;
             thickness = (startBinarySearch) ? thickness : MARCHING_THICKNESS_MEDIUM_STEP;
             marchingThickness = MARCHING_THICKNESS;
         }
-        else if (i > MAX_MEDIUM_STEP && !activeSamplingSmall && activeSamplingMedium)
+        else if (i > MAX_MEDIUM_STEP)
         {
-            activeSamplingMedium = false;
             // [Far] Use a small step size only when objects are close to the camera.
             currStepSize = (startBinarySearch) ? currStepSize : stepSize;
             thickness = (startBinarySearch) ? thickness : MARCHING_THICKNESS;
@@ -68,8 +62,8 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
         //float3 lastRayPositionNDC = ComputeNormalizedDeviceCoordinatesWithZ(lastRayPositionWS, GetWorldToHClipMatrix());
 
         // Move to the next step if the current ray moves less than 1 pixel across the screen.
-        if (i <= MAX_MEDIUM_STEP && abs(rayPositionNDC.x - lastRayPositionNDC.x) < _BlitTexture_TexelSize.x && abs(rayPositionNDC.y - lastRayPositionNDC.y) < _BlitTexture_TexelSize.y)
-            continue;
+        //if (i <= MAX_MEDIUM_STEP && abs(rayPositionNDC.x - lastRayPositionNDC.x) < _BlitTexture_TexelSize.x && abs(rayPositionNDC.y - lastRayPositionNDC.y) < _BlitTexture_TexelSize.y)
+            //continue;
 
     #if (UNITY_REVERSED_Z == 0) // OpenGL platforms
         rayPositionNDC.z = rayPositionNDC.z * 0.5 + 0.5; // -1..1 to 0..1
@@ -104,7 +98,7 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
 
         // Avoid infinite thickness for objects with no thickness (ex. Plane).
         // 1. Back-face depth value is not from sky
-        // 2. Back-faces should behind Front-faces.
+        // 2. Back-faces should be behind front-faces.
         bool backDepthValid = false; 
     #if defined(_BACKFACE_TEXTURES)
         deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).r;
@@ -123,7 +117,6 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
         // Disable binary search:
         // 1. The ray points to the camera plane, but is in front of all objects.
         // 2. The ray leaves the camera plane, but is behind all objects.
-        // 3. The ray is an outgoing (refracted) ray. (we only have 3-layer depth)
         bool cannotBinarySearch = !startBinarySearch && (isFrontRay ? hitDepth > sceneBackDepth : hitDepth < sceneDepth);
 
         // Start binary search when the ray is behind the actual intersection.
@@ -133,8 +126,7 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
         // If the ray passes through the intersection, we flip the sign of step size.
         if (startBinarySearch)
         {
-            currStepSize *= 0.5;
-            currStepSize = (FastSign(currStepSize) == Sign) ? currStepSize : -currStepSize;
+            currStepSize *= (FastSign(currStepSize) == Sign) ? 0.5 : -0.5;
         }
 
         // Do not reflect sky, use reflection probe fallback.
@@ -149,7 +141,6 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
 
         // Ignore the incorrect "backDepthDiff" when objects (ex. Plane with front face only) has no thickness and blocks the backface depth rendering of objects behind it.
     #if defined(_BACKFACE_TEXTURES)
-        UNITY_BRANCH
         if (backDepthValid)
         {
             // It's difficult to find the intersection of thin objects in several steps with large step sizes, so we add a minimum thickness to all objects to make it visually better.
@@ -163,7 +154,6 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
         }
 
         // If we find the intersection.
-        UNITY_BRANCH
         if (hitSuccessful)
         {
             rayHit.position = rayPositionWS;
@@ -183,7 +173,7 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
         {
             // As the distance increases, the accuracy of ray intersection test becomes less important.
             currStepSize += currStepSize * 0.1;
-            marchingThickness += MARCHING_THICKNESS * 0.25;
+            marchingThickness += _Thickness_Increment;
         }
 
         // Update last step's depth difference.

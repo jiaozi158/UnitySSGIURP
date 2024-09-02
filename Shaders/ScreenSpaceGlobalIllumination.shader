@@ -18,6 +18,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 		// Pass 6: Combine & Upscale GI
 		// Pass 7: [Editor only] Camera Motion Vectors
 		// Pass 8: Poisson Disk Recurrent Denoise
+		// Pass 9: Blit Color Texture
 
 		Pass
 		{
@@ -128,7 +129,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 				float2 screenUV = input.texcoord;
 
-				half4 lightingDistance = half4(0.0, 0.0, 0.0, 1.0); // indirectDiffuse.rgb + distance.a
+				half4 lightingDistance = half4(0.0, 0.0, 0.0, 0.0); // indirectDiffuse.rgb + distance.a
 
 				float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
 
@@ -146,7 +147,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				// Start denoising before tracing SSGI
 				// If the history sample for a pixel will be invalid, we increase the number of samples and reduce ray marching quality.
 
-				// TODO: find a way to calculate it only once. (SSGI pass & Temporal Reprojection pass)
 				float3 positionWS = ComputeWorldSpacePosition(screenUV, depth, UNITY_MATRIX_I_VP);
 				float3 cameraPositionWS = GetCameraPositionWS();
 				half3 viewDirectionWS = normalize(cameraPositionWS - positionWS);
@@ -185,7 +185,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				screenHit.normal = normalSmoothness.xyz;
 
 				// If reprojection fails, we increase the number of samples and reduce ray marching quality.
-				UNITY_BRANCH
 				if (!canBeReprojected)
 				{
 					MAX_STEP = 8;
@@ -196,10 +195,9 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 					RAY_COUNT = max(4, RAY_COUNT);
 				}
 
-				// Set the hit distance to 0
-				lightingDistance.a = 0.0;
-
 				half dither = (GenerateRandomValue(screenUV) * 0.3 - 0.15);
+
+				half sampleWeight = rcp(RAY_COUNT);
 
 				for (int i = 0; i < RAY_COUNT; i++)
 				{
@@ -213,9 +211,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 					rayHit = RayMarching(ray, screenUV, dither, viewDirectionWS);
 
 					bool hitSuccessful = rayHit.distance > REAL_EPS;
-
-					// TODO: Move uniform computations to CPU
-					half sampleWeight = rcp(RAY_COUNT);
 
 					UNITY_BRANCH
 					if (hitSuccessful)
@@ -234,6 +229,9 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				lightingDistance.xyz = RgbToHsv(lightingDistance.xyz);
 				lightingDistance.z = clamp(lightingDistance.z, 0.0, _MaxBrightness);
 				lightingDistance.xyz = HsvToRgb(lightingDistance.xyz);
+
+				// Set it to negative to pass "canBeReprojected" to the denoising pass
+				lightingDistance.w = canBeReprojected ? lightingDistance.w : -lightingDistance.w;
 
 				return lightingDistance;
 			}
@@ -272,49 +270,18 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float2 prevUV = screenUV - velocity;
 
 				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
-				float prevDeviceDepth = SAMPLE_TEXTURE2D_X_LOD(_SSGIHistoryDepthTexture, my_point_clamp_sampler, prevUV, 0).r;
-
-				half4 normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyzw;
 
 				// Fetch the current and history values and apply the exposition to it.
 				half4 currentColor = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, sampler_LinearClamp, screenUV, 0).rgba;
 
-			#if defined(_GBUFFER_NORMALS_OCT)
-				half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normalSmoothness.xyz));                // values between [ 0, +1]
-				half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                        // values between [-1, +1]
-				normalSmoothness.xyz = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
-			#endif 
-
-				bool isSky = deviceDepth == UNITY_RAW_FAR_CLIP_VALUE? true : false;
-
-			#if !UNITY_REVERSED_Z
-				deviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, deviceDepth);
-				prevDeviceDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, prevDeviceDepth);
-			#endif
-
-				bool canBeReprojected = true;
-				if (isSky || prevUV.x > 1.0 || prevUV.x < 0.0 || prevUV.y > 1.0 || prevUV.y < 0.0)
-				{
-					canBeReprojected = false;
-				}
-
-				float3 positionWS = ComputeWorldSpacePosition(screenUV, deviceDepth, UNITY_MATRIX_I_VP);
-				float3 prevPositionWS = ComputeWorldSpacePosition(prevUV, prevDeviceDepth, _PrevInvViewProjMatrix); // "UNITY_MATRIX_PREV_I_VP" doesn't exist in URP yet
-
-				half3 viewDirWS = normalize(GetCameraPositionWS() - positionWS);
-
-				// Re-projected color from last frame.
 				half historySample = SAMPLE_TEXTURE2D_X_LOD(_SSGIHistorySampleTexture, my_point_clamp_sampler, prevUV, 0).r;
 
-				// Compute the max world radius that we consider acceptable for history reprojection
-				half maxRadius = ComputeMaxReprojectionWorldRadius(positionWS, viewDirWS, normalSmoothness.xyz, _PixelSpreadAngleTangent);
-				half radius = length(prevPositionWS - positionWS) / maxRadius;
+				// Extract the "canBeReprojected" variable.
+				bool canBeReprojected = FastSign(currentColor.a) == 1.0;
+				currentColor.a = abs(currentColor.a);
 
-				// Is it too far from the current position?
-				if (radius > 1.0 || !_HistoryTextureValid)
-				{
-					canBeReprojected = false;
-				}
+				bool isSky = deviceDepth == UNITY_RAW_FAR_CLIP_VALUE? true : false;
+				canBeReprojected = isSky || historySample == 0.0 ? false : canBeReprojected;
 
 				// Re-projected color from last frame.
 				half3 prevColor = SAMPLE_TEXTURE2D_X_LOD(_HistoryIndirectDiffuseTexture, sampler_LinearClamp, prevUV, 0).rgb;
@@ -326,11 +293,11 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				half3 result;
 
 				UNITY_BRANCH
-				if (canBeReprojected && historySample != 0.0)
+				if (canBeReprojected)
 				{
 					result = (currentColor.rgb * (1.0 - accumulationFactor) + prevColor.rgb * accumulationFactor);
 				}
-				else if (_AggressiveDenoise == 1.0)
+				else if (_AggressiveDenoise)
 				{
 					// Performance cost here can be reduced by removing less important operations.
 					
@@ -366,7 +333,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 					result = currentColor.rgb;
 					sampleCount = 1.0;
 				}
-
 
 				denoiseOutput = half4(result, currentColor.a);
 				//denoiseOutput = half4(historySample.xxx * rcp(MAX_ACCUM_FRAME_NUM) - rcp(MAX_ACCUM_FRAME_NUM), currentColor.a); // debug sample count
@@ -573,7 +539,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				*/
 
 				// Re-projected color from last frame.
-				half3 prevColor = SAMPLE_TEXTURE2D_LOD(_HistoryIndirectDiffuseTexture, sampler_LinearClamp, prevUV, 0).rgb;
+				half3 prevColor = SAMPLE_TEXTURE2D_X_LOD(_HistoryIndirectDiffuseTexture, sampler_LinearClamp, prevUV, 0).rgb;
 
 				// Can be replace by clamp() to reduce performance cost.
 				//prevColor = DirectClipToAABB(prevColor, boxMin, boxMax);
@@ -652,6 +618,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
 
 			#pragma multi_compile_local_fragment _ _USE_RENDERING_LAYERS
+		    #pragma multi_compile_local_fragment _ _DEPTH_NORMALS_UPSCALE
 
 		#if defined(_USE_RENDERING_LAYERS)
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareRenderingLayerTexture.hlsl"
@@ -659,7 +626,10 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 			#include "./SSGI.hlsl"
 
-			half3 BilateralUpscale(float2 screenUV, float deviceDepth)
+			// Nearest-depth upscaling
+			// Refer to "https://developer.download.nvidia.com/assets/gamedev/files/sdk/11/OpacityMappingSDKWhitePaper.pdf".
+            
+			half3 DepthNormalsUpscale(float2 screenUV, float deviceDepth)
 			{
 				float2 offsetUV = screenUV;
 				offsetUV.y -= _IndirectDiffuseTexture_TexelSize.y;
@@ -701,20 +671,20 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);           // values between [-1, +1]
 				centerNormal = half3(UnpackNormalOctQuadEncode(octNormalWS));                 // values between [-1, +1]
 
-				remappedOctNormalWS = half2(Unpack888ToFloat2(normal0));					  // values between [ 0, +1]
-				octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);				  // values between [-1, +1]
+				remappedOctNormalWS = half2(Unpack888ToFloat2(normal0));                      // values between [ 0, +1]
+				octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                 // values between [-1, +1]
 				normal0 = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
 
-				remappedOctNormalWS = half2(Unpack888ToFloat2(normal1));					  // values between [ 0, +1]
-				octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);				  // values between [-1, +1]
+				remappedOctNormalWS = half2(Unpack888ToFloat2(normal1));                      // values between [ 0, +1]
+				octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                 // values between [-1, +1]
 				normal1 = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
 
-				remappedOctNormalWS = half2(Unpack888ToFloat2(normal2));					  // values between [ 0, +1]
-				octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);				  // values between [-1, +1]
+				remappedOctNormalWS = half2(Unpack888ToFloat2(normal2));                      // values between [ 0, +1]
+				octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                 // values between [-1, +1]
 				normal2 = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
 
-				remappedOctNormalWS = half2(Unpack888ToFloat2(normal3));					  // values between [ 0, +1]
-				octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);				  // values between [-1, +1]
+				remappedOctNormalWS = half2(Unpack888ToFloat2(normal3));                      // values between [ 0, +1]
+				octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                 // values between [-1, +1]
 				normal3 = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
 			#endif
 
@@ -734,6 +704,58 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float2 bestUV = bestDistance == distances.x ? uv0 : bestDistance == distances.y ? uv1 : bestDistance == distances.z ? uv2 : uv3;
 
 				resultColor = SAMPLE_TEXTURE2D_X_LOD(_IndirectDiffuseTexture, my_linear_clamp_sampler, bestUV, 0).xyz;
+
+				return resultColor;
+			}
+            
+			half3 DepthUpscale(float2 screenUV, float deviceDepth)
+			{
+				float2 offsetUV = screenUV;
+				offsetUV.y -= _IndirectDiffuseTexture_TexelSize.y;
+
+				half3 centerNormal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyz;
+				float centerDepth = Linear01Depth(deviceDepth, _ZBufferParams);
+
+				half3 resultColor = half3(0.0, 0.0, 0.0);
+
+				float2 uv0 = offsetUV + float2(0.0, _IndirectDiffuseTexture_TexelSize.y);
+				float2 uv1 = offsetUV + _IndirectDiffuseTexture_TexelSize.xy;
+				float2 uv2 = offsetUV + float2(_IndirectDiffuseTexture_TexelSize.x, 0.0);
+				float2 uv3 = offsetUV + float2(0.0, 0.0);
+
+				// We can use a gather here but that requires shader model 5.0
+				float4 neighborDepth = float4(
+					SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv0, 0).x,
+					SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv1, 0).x,
+					SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv2, 0).x,
+					SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv3, 0).x);
+
+			#if !UNITY_REVERSED_Z
+				neighborDepth = lerp(UNITY_NEAR_CLIP_VALUE.xxxx, float4(1.0, 1.0, 1.0, 1.0), neighborDepth);
+            #endif
+
+				neighborDepth = float4(
+					Linear01Depth(neighborDepth.x, _ZBufferParams),
+					Linear01Depth(neighborDepth.y, _ZBufferParams),
+					Linear01Depth(neighborDepth.z, _ZBufferParams),
+					Linear01Depth(neighborDepth.w, _ZBufferParams));
+
+				half4 distances;
+				distances.x = abs(neighborDepth.x - centerDepth);
+				distances.y = abs(neighborDepth.y - centerDepth);
+				distances.z = abs(neighborDepth.z - centerDepth);
+				distances.w = abs(neighborDepth.w - centerDepth);
+
+				half bestDistance = min(min(min(distances.x, distances.y), distances.z), distances.w);
+
+				float2 bestUV = bestDistance == distances.x ? uv0 : bestDistance == distances.y ? uv1 : bestDistance == distances.z ? uv2 : uv3;
+
+				const half depthThreshold = 0.01;
+
+				if (distances.x < depthThreshold && distances.y < depthThreshold && distances.z < depthThreshold && distances.w < depthThreshold)
+				    resultColor = SAMPLE_TEXTURE2D_X_LOD(_IndirectDiffuseTexture, my_linear_clamp_sampler, bestUV, 0).xyz;
+				else
+					resultColor = SAMPLE_TEXTURE2D_X_LOD(_IndirectDiffuseTexture, my_point_clamp_sampler, screenUV, 0).xyz;
 
 				return resultColor;
 			}
@@ -762,19 +784,26 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			#endif
 
 				half4 gbuffer0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, screenUV, 0);
-				half3 albedo = gbuffer0.rgb;
 				half4 gbuffer1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, my_point_clamp_sampler, screenUV, 0);
+
+				half3 albedo = gbuffer0.rgb;
 				half metallic = (gbuffer0.a == kMaterialFlagSpecularSetup) ? MetallicFromReflectivity(ReflectivitySpecular(gbuffer1.rgb)) : gbuffer1.r;
 
 				half3 indirectLighting;
 
 				UNITY_BRANCH
 				if (_DownSample == 1.0)
-					indirectLighting = SAMPLE_TEXTURE2D_X_LOD(_IndirectDiffuseTexture, my_linear_clamp_sampler, screenUV, 0).rgb * albedo * (1.0 - metallic);
+					indirectLighting = SAMPLE_TEXTURE2D_X_LOD(_IndirectDiffuseTexture, my_point_clamp_sampler, screenUV, 0).rgb;
 				else
-				    indirectLighting = BilateralUpscale(screenUV, depth) * albedo * (1.0 - metallic);
+				#ifdef _DEPTH_NORMALS_UPSCALE
+					indirectLighting = DepthNormalsUpscale(screenUV, depth);
+                #else
+				    indirectLighting = DepthUpscale(screenUV, depth);
+                #endif
 
 				half4 directLighting = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgba;
+
+				indirectLighting *= albedo * (1.0 - metallic);
 
 				// Apply the indirect lighting multiplier
 				indirectLighting *= _IndirectDiffuseLightingMultiplier;
@@ -901,38 +930,37 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				float3 cameraPositionWS = GetCameraPositionWS();
 				half3 viewDirectionWS = normalize(cameraPositionWS - positionWS);
 
-				half4 normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0);
-				half centerRoughness = 1.0 - normalSmoothness.w;
+				half3 centerNormal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyz;
+
 			#if defined(_GBUFFER_NORMALS_OCT)
-				half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normalSmoothness.xyz));                // values between [ 0, +1]
+				half2 remappedOctNormalWS = half2(Unpack888ToFloat2(centerNormal.xyz));                    // values between [ 0, +1]
 				half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                        // values between [-1, +1]
-				normalSmoothness.xyz = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+				centerNormal.xyz = half3(UnpackNormalOctQuadEncode(octNormalWS));                          // values between [-1, +1]
 			#endif
-				half3 centerNormal = normalSmoothness.xyz;
 
 				// Convert both directions to view space
 				//half NdotV = abs(dot(centerNormal, viewDirectionWS));
 
 				// Get the dominant direction
-				half4 dominantWS = GetSpecularDominantDirection(centerNormal, viewDirectionWS, 1.0);
+				half4 dominantWS = GetSpecularDominantDirection(centerNormal, viewDirectionWS);
 
 				// Evaluate the blur radius
 				//float distanceToCamera = length(positionWS - cameraPositionWS);
 				//half blurRadius = ComputeBlurRadius(1.0, BLUR_MAX_RADIUS) * _ReBlurDenoiserRadius;
-				half blurRadius = BLUR_MAX_RADIUS * _ReBlurDenoiserRadius;
+				half blurRadius = _ReBlurDenoiserRadius; // * BLUR_MAX_RADIUS;
 				//blurRadius *= max(1.0 - saturate(accumulationFactor / MAX_ACCUM_FRAME_NUM), 1.0);
 				//blurRadius *= HitDistanceAttenuation(centerRoughness, distanceToCamera, centerSignal.w);
 				//blurRadius *= lerp(saturate((distanceToCamera - MIN_BLUR_DISTANCE) / BLUR_OUT_RANGE), 0.0, 1.0);
 
 				// Evalute the local basis
-				half2x3 TvBv = GetKernelBasis(dominantWS.xyz, centerNormal, 1.0);
+				half2x3 TvBv = GetKernelBasis(dominantWS.xyz, centerNormal);
 				TvBv[0] *= blurRadius;
 				TvBv[1] *= blurRadius;
 
 				// Loop through the samples
 				float4 signalSum = 0.0; // requires full precision float
 				float sumWeight = 0.0;
-				for (uint sampleIndex = 0; sampleIndex < POISSON_SAMPLE_COUNT; ++sampleIndex)
+				for (int sampleIndex = 0; sampleIndex < POISSON_SAMPLE_COUNT; ++sampleIndex)
 				{
 					// Pick the next sample value
 					half3 offset = k_PoissonDiskSamples[sampleIndex];
@@ -949,7 +977,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 					half depthWeight = 1.0;
 					half normalWeight = 1.0;
 					half planeWeight = 1.0;
-					half roughnessWeight = 1.0;
 
 					float sampleDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, uv, 0).r;
 
@@ -961,14 +988,13 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 					sampleDepth = Linear01Depth(sampleDepth, _ZBufferParams);
 
-					half4 normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, uv, 0);
-					half sampleRoughness = 1.0 - normalSmoothness.w;
+					half3 sampleNormal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, uv, 0).xyz;
+					
 				#if defined(_GBUFFER_NORMALS_OCT)
-					half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normalSmoothness.xyz));                // values between [ 0, +1]
+					half2 remappedOctNormalWS = half2(Unpack888ToFloat2(sampleNormal.xyz));                    // values between [ 0, +1]
 					half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);                        // values between [-1, +1]
-					normalSmoothness.xyz = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+					sampleNormal.xyz = half3(UnpackNormalOctQuadEncode(octNormalWS));                          // values between [-1, +1]
 				#endif
-					half3 sampleNormal = normalSmoothness.xyz;
 
 					depthWeight = max(0.0, 1.0 - abs(sampleDepth - centerDepth));
 
@@ -977,22 +1003,20 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 					normalWeight = max(0.0, (1.0 - normalError));
 
 					// Change in position in camera space
-					const float3 dq = positionWS - samplePositionWS;
+					const half3 dq = positionWS - samplePositionWS;
 
 					// How far away is this point from the original sample
 					// in camera space? (Max value is unbounded)
-					const float distance2 = dot(dq, dq);
+					const half distance2 = dot(dq, dq);
 
 					// How far off the expected plane (on the perpendicular) is this point? Max value is unbounded.
-					const float planeError = max(abs(dot(dq, sampleNormal)), abs(dot(dq, centerNormal)));
+					const half planeError = max(abs(dot(dq, sampleNormal)), abs(dot(dq, centerNormal)));
 
 					planeWeight = (distance2 < 0.0001) ? 1.0 :
 					pow(max(0.0, 1.0 - 2.0 * planeError / sqrt(distance2)), 2.0);
-					
-					roughnessWeight = max(0.0, 1.0 - abs(sampleRoughness - centerRoughness));
 
-					half w = GetGaussianWeight(offset.z);
-					w *= depthWeight * normalWeight * planeWeight * roughnessWeight;
+					half w = k_GaussianWeight[sampleIndex]; //GetGaussianWeight(offset.z);
+					w *= depthWeight * normalWeight * planeWeight;
 					w = (sampleDepth != 1.0) && isInScreen ? w : 0.0;
 
 					// Fetch the full resolution depth
@@ -1012,5 +1036,40 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 			}
 			ENDHLSL
 		}
+
+		Pass
+        {
+            Name "Blit Color Texture"
+			Tags { "LightMode" = "Screen Space Global Illumination" }
+
+            Blend One Zero
+			
+			HLSLPROGRAM
+			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+			// The Blit.hlsl file provides the vertex shader (Vert),
+			// input structure (Attributes) and output structure (Varyings)
+			#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+			
+			#pragma vertex Vert
+			#pragma fragment frag
+
+            #pragma target 3.5
+
+            // URP pre-defined the following variable on 2023.2+.
+        #if UNITY_VERSION < 202320
+            float4 _BlitTexture_TexelSize;
+        #endif
+
+			SAMPLER(my_point_clamp_sampler);
+            
+            half4 frag(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                float2 screenUV = input.texcoord;
+
+                return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgba;
+            }
+            ENDHLSL
+        }
     }
 }

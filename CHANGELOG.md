@@ -5,6 +5,23 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2024-09-02
+
+### Added
+
+- Added **High Quality Upscaling** option to re-enable the previous upscaling method.
+- Added **Artistic Overrides** header to the **Indirect Diffuse Lighting Multiplier** property.
+
+### Changed
+
+- Improved SSGI performance by reducing arithmetic and texture sampling operations.
+
+### Fixed
+
+- Fixed an issue with incorrect depth precision on mobile platforms.
+- Fixed an issue where a temporary camera texture did not follow URP render scale.
+
+
 ## [1.0.8] - 2024-08-30
 
 ### Added

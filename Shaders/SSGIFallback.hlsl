@@ -266,20 +266,19 @@ half3 SampleReflectionProbesCubemap(half3 reflectVector, float3 positionWS, half
 {
     half3 color = half3(0.0, 0.0, 0.0);
     // Check if the reflection probes are correctly set.
-    if (_ProbeSet != 1.0)
+    if (!_ProbeSet)
         return color;
-    UNITY_BRANCH
+
+    half3 uvw = reflectVector;
+
     if (_SpecCube0_ProbePosition.w > 0.0) // Box Projection Probe
     {
         float3 factors = ((reflectVector > 0 ? _SpecCube0_BoxMax.xyz : _SpecCube0_BoxMin.xyz) - positionWS) * rcp(reflectVector);
         float scalar = min(min(factors.x, factors.y), factors.z);
-        float3 uvw = reflectVector * scalar + (positionWS - _SpecCube0_ProbePosition.xyz);
-        color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, uvw, mipLevel), _SpecCube0_HDR).rgb; // "mip level 1" will provide a less noisy result.
+        uvw = reflectVector * scalar + (positionWS - _SpecCube0_ProbePosition.xyz);
     }
-    else
-    {
-        color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, reflectVector, mipLevel), _SpecCube0_HDR).rgb;
-    }
+
+    color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, uvw, mipLevel), _SpecCube0_HDR).rgb;
 
     // TODO: Implement a better reflection probe blending for Forward & Deferred path
     /*
@@ -317,7 +316,7 @@ half3 SampleReflectionProbes(half3 reflectVector, float3 positionWS, half mipLev
         color = SampleReflectionProbesCubemap(reflectVector, positionWS, mipLevel);
     #endif
     
-    // Limit the intensity of path tracing results accumulated in reflection probe
-    return (_IsProbeCamera == 1.0) ? color * 0.3 : color;
+    // Limit the intensity of SSGI results accumulated in reflection probe
+    return _IsProbeCamera ? color * 0.3 : color;
 }
 #endif

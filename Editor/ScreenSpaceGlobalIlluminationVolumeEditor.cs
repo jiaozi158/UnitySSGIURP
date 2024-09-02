@@ -49,7 +49,12 @@ class ExampleComponentEditor : VolumeComponentEditor
     const string k_WRITE_RENDERING_LAYERS = "_WRITE_RENDERING_LAYERS";
 
     const string k_RendererDataList = "m_RendererDataList";
+
+#if UNITY_2023_3_OR_NEWER
     const string k_GetHDRCubemapEncodingQualityForPlatform = "GetHDRCubemapEncodingQualityForPlatform";
+#else
+    const string k_GetHDRCubemapEncodingQualityForPlatform = "GetHDRCubemapEncodingQualityForPlatformGroup";
+#endif
 
     const string k_SsgiRendererFeature = "ScreenSpaceGlobalIlluminationURP";
     const string k_NoRendererFeatureMessage = "Screen Space Global illumination renderer feature is disabled in the active URP renderer.";
@@ -105,9 +110,9 @@ class ExampleComponentEditor : VolumeComponentEditor
         m_RayMiss = Unpack(o.Find(x => x.rayMiss));
 
         m_IndirectDiffuseLightingMultiplier = Unpack(o.Find(x => x.indirectDiffuseLightingMultiplier));
-    #if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_1_OR_NEWER
         m_IndirectDiffuseRenderingLayers = Unpack(o.Find(x => x.indirectDiffuseRenderingLayers));
-    #endif
+#endif
         base.OnEnable();
     }
 
@@ -229,7 +234,7 @@ class ExampleComponentEditor : VolumeComponentEditor
         PropertyField(m_RayMiss);
         PropertyField(m_IndirectDiffuseLightingMultiplier);
 
-    #if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_1_OR_NEWER
         if (m_IndirectDiffuseRenderingLayers.overrideState.boolValue && m_IndirectDiffuseRenderingLayers.value.intValue != -1)
         {
             bool enableRenderingLayers = Shader.IsKeywordEnabled(k_LIGHT_LAYERS);
@@ -254,7 +259,7 @@ class ExampleComponentEditor : VolumeComponentEditor
             }
         }
         PropertyField(m_IndirectDiffuseRenderingLayers);
-    #endif
+#endif
     }
     void LoadCurrentQualityMode(ScreenSpaceGlobalIlluminationVolume.QualityMode mode)
     {
@@ -288,7 +293,7 @@ class ExampleComponentEditor : VolumeComponentEditor
     /// Check if the SSGI renderer feature has been added.
     /// From "https://forum.unity.com/threads/enable-or-disable-render-features-at-runtime.932571/"
     /// </summary>
-    #region Reflection
+#region Reflection
     private static FieldInfo RenderDataListFieldInfo;
     private static MethodInfo GetHDRCubemapEncodingQualityMethodInfo;
 
@@ -348,7 +353,11 @@ class ExampleComponentEditor : VolumeComponentEditor
 
     private HDRCubemapEncodingQuality GetHDRCubemapEncodingQuality()
     {
+    #if UNITY_2023_3_OR_NEWER
         BuildTarget buildTarget = EditorUserBuildSettings.activeBuildTarget;
+    #else
+        BuildTargetGroup buildTarget = BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget);
+    #endif
 
         if (GetHDRCubemapEncodingQualityMethodInfo != null)
         {
@@ -366,5 +375,5 @@ class ExampleComponentEditor : VolumeComponentEditor
             return HDRCubemapEncodingQuality.High;
         }
     }
-    #endregion
+#endregion
 }

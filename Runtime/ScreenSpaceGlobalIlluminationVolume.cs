@@ -144,7 +144,7 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
     /// <summary>
     /// Controls the indirect diffuse lighting from screen space global illumination.
     /// </summary>
-    [InspectorName("Indirect Diffuse Lighting Multiplier"), Tooltip("Controls the indirect diffuse lighting from screen space global illumination.")]
+    [Header("Artistic Overrides"), InspectorName("Indirect Diffuse Lighting Multiplier"), Tooltip("Controls the indirect diffuse lighting from screen space global illumination.")]
     public MinFloatParameter indirectDiffuseLightingMultiplier = new MinFloatParameter(1.0f, 0.0f);
 
 #if UNITY_2023_1_OR_NEWER
