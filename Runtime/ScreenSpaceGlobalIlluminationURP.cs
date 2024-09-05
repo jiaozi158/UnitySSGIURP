@@ -1,6 +1,7 @@
+using System;
 using System.Reflection;
-using Unity.Collections;
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -348,7 +349,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         m_SSGIMaterial.SetFloat(_Thickness, ssgiVolume.depthBufferThickness.value);
         m_SSGIMaterial.SetFloat(_Thickness_Increment, ssgiVolume.depthBufferThickness.value * 0.25f);
         m_SSGIMaterial.SetFloat(_RayCount, ssgiVolume.sampleCount.value);
-        m_SSGIMaterial.SetFloat(_TemporalIntensity, ssgiVolume.denoiseIntensitySS.value);
+        m_SSGIMaterial.SetFloat(_TemporalIntensity, ssgiVolume.denoiseSS.value ? ssgiVolume.denoiseIntensitySS.value + 0.02f : 0.0f);
         m_SSGIMaterial.SetFloat(_ReBlurDenoiserRadius, ssgiVolume.denoiserRadiusSS.value * 2.0f * k_BlurMaxRadius); // Optimized for roughness = 1.0
         m_SSGIMaterial.SetFloat(_IndirectDiffuseLightingMultiplier, ssgiVolume.indirectDiffuseLightingMultiplier.value);
         m_SSGIMaterial.SetFloat(_MaxBrightness, 7.0f);
@@ -485,6 +486,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         public PreRenderScreenSpaceGlobalIlluminationPass() { }
 
         #region Non Render Graph Pass
+    #if UNITY_6000_0_OR_NEWER
+        [Obsolete]
+    #endif
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             CommandBuffer cmd = CommandBufferPool.Get();
@@ -515,6 +519,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             CommandBufferPool.Release(cmd);
         }
 
+    #if UNITY_6000_0_OR_NEWER
+        [Obsolete]
+    #endif
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             var cameraData = renderingData.cameraData;
@@ -622,6 +629,10 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         }
 
         #region Non Render Graph Pass
+
+    #if UNITY_6000_0_OR_NEWER
+        [Obsolete]
+    #endif
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             RTHandle colorHandle = renderingData.cameraData.renderer.cameraColorTargetHandle;
@@ -708,6 +719,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             CommandBufferPool.Release(cmd);
         }
 
+    #if UNITY_6000_0_OR_NEWER
+        [Obsolete]
+    #endif
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             var visibleReflectionProbes = renderingData.cullResults.visibleReflectionProbes;
@@ -726,7 +740,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             int width = (int)(camera.scaledPixelWidth * renderingData.cameraData.renderScale);
             int height = (int)(camera.scaledPixelHeight * renderingData.cameraData.renderScale);
 
-            bool denoiseStateChanged = ssgiVolume.denoiseSS.value && !enableDenoise;
+            bool denoiseStateChanged = ssgiVolume.denoiseSS.value != enableDenoise;
             bool resolutionStateChanged = ssgiVolume.fullResolutionSS.value ? resolutionScale != 1.0f : ssgiVolume.resolutionScaleSS.value != resolutionScale;
             resolutionStateChanged |= (historyCameraScaledWidth != width) || (historyCameraScaledHeight != height);
             if (denoiseStateChanged || resolutionStateChanged)
@@ -988,9 +1002,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 int width = (int)(camera.scaledPixelWidth * cameraData.renderScale);
                 int height = (int)(camera.scaledPixelHeight * cameraData.renderScale);
 
-                bool denoiseStateChanged = ssgiVolume.denoiseSS.value && !enableDenoise;
+                bool denoiseStateChanged = ssgiVolume.denoiseSS.value != enableDenoise;
                 bool resolutionStateChanged = ssgiVolume.fullResolutionSS.value ? resolutionScale != 1.0f : ssgiVolume.resolutionScaleSS.value != resolutionScale;
-                resolutionStateChanged |= (historyCameraScaledWidth != camera.scaledPixelWidth) || (historyCameraScaledHeight != camera.scaledPixelHeight);
+                resolutionStateChanged |= (historyCameraScaledWidth != width) || (historyCameraScaledHeight != height);
                 if (denoiseStateChanged || resolutionStateChanged)
                     isHistoryTextureValid = false;
 
@@ -1247,6 +1261,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
         #region Non Render Graph Pass
 
+    #if UNITY_6000_0_OR_NEWER
+        [Obsolete]
+    #endif
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             var depthDesc = renderingData.cameraData.cameraTargetDescriptor;
@@ -1288,6 +1305,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             }
         }
 
+    #if UNITY_6000_0_OR_NEWER
+        [Obsolete]
+    #endif
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             CommandBuffer cmd = CommandBufferPool.Get();
@@ -1501,6 +1521,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         }
 
         #region Non Render Graph Pass
+    #if UNITY_6000_0_OR_NEWER
+        [Obsolete]
+    #endif
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             // GBuffer cannot store surface data from transparent objects.
@@ -1523,6 +1546,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             CommandBufferPool.Release(cmd);
         }
 
+    #if UNITY_6000_0_OR_NEWER
+        [Obsolete]
+    #endif
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;

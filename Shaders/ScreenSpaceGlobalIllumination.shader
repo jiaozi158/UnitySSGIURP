@@ -185,7 +185,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				screenHit.normal = normalSmoothness.xyz;
 
 				// If reprojection fails, we increase the number of samples and reduce ray marching quality.
-				if (!canBeReprojected)
+				if (!canBeReprojected && _TemporalIntensity != 0.0)
 				{
 					MAX_STEP = 8;
 					MAX_SMALL_STEP = 0;
