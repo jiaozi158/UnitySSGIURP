@@ -2,6 +2,7 @@
 #define URP_SCREEN_SPACE_GLOBAL_ILLUMINATION_FALLBACK_HLSL
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "./SSGIUtilities.hlsl"
 
 half3 BoxProjectedDirection(half3 reflectVector, float3 positionWS, float3 probePosition, half3 boxMin, half3 boxMax)
 {
@@ -201,6 +202,8 @@ half3 SampleReflectionProbesAtlas(half3 reflectVector, float3 positionWS, half m
     half3 irradiance = half3(0.0h, 0.0h, 0.0h);
 
     float totalWeight = 0.0f;
+
+#if defined(_RAYMARCHING_FALLBACK_REFLECTION_PROBES)
     uint probeIndex;
     ClusterIterator it = ClusterInit(normalizedScreenSpaceUV, positionWS, 1);
     [loop] while (ClusterNext(it, probeIndex) && totalWeight < 0.99f && probeIndex <= 32)
@@ -255,6 +258,22 @@ half3 SampleReflectionProbesAtlas(half3 reflectVector, float3 positionWS, half m
         irradiance += weight * lerp(encodedIrradiance0, encodedIrradiance1, mipBlend);
         totalWeight += weight;
     }
+#endif
+
+#if defined(_RAYMARCHING_FALLBACK_SKY)
+    if (totalWeight < 1.0f)
+    {
+        UpdateAmbientSH();
+    #if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
+        half3 viewDirectionWS = normalize(GetCameraPositionWS() - positionWS);
+        half4 probeOcclusion;
+        half3 ambientLighting = SSGISampleProbeVolumePixel(positionWS, reflectVector, viewDirectionWS, normalizedScreenSpaceUV, probeOcclusion);
+        irradiance += ambientLighting * probeOcclusion.rgb * (1.0 - totalWeight);
+    #else
+        irradiance += SSGIEvaluateAmbientProbeSRGB(reflectVector) * (1.0 - totalWeight);
+    #endif
+    }
+#endif
 
     return irradiance;
 }
@@ -265,10 +284,22 @@ half3 SampleReflectionProbesAtlas(half3 reflectVector, float3 positionWS, half m
 half3 SampleReflectionProbesCubemap(half3 reflectVector, float3 positionWS, half mipLevel)
 {
     half3 color = half3(0.0, 0.0, 0.0);
+
     // Check if the reflection probes are correctly set.
+    // We don't support probe blending in Forward & Deferred path yet.
+#if defined(_RAYMARCHING_FALLBACK_SKY)
+    if (!_ProbeSet)
+    {
+        UpdateAmbientSH();
+        color = SSGIEvaluateAmbientProbeSRGB(reflectVector.xyz);
+        return color;
+    }
+#else
     if (!_ProbeSet)
         return color;
+#endif
 
+#if defined(_RAYMARCHING_FALLBACK_REFLECTION_PROBES)
     half3 uvw = reflectVector;
 
     if (_SpecCube0_ProbePosition.w > 0.0) // Box Projection Probe
@@ -302,6 +333,8 @@ half3 SampleReflectionProbesCubemap(half3 reflectVector, float3 positionWS, half
         color = lerp(color, probe2Color, _ProbeWeight).rgb;
     }
     */
+#endif
+
     return color;
 }
 #endif

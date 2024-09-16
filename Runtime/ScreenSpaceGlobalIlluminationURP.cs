@@ -220,6 +220,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
     // Local Keywords
     private const string _FP_REFL_PROBE_ATLAS = "_FP_REFL_PROBE_ATLAS";
+    private const string _RAYMARCHING_FALLBACK_SKY = "_RAYMARCHING_FALLBACK_SKY";
+    private const string _RAYMARCHING_FALLBACK_REFLECTION_PROBES = "_RAYMARCHING_FALLBACK_REFLECTION_PROBES";
     private const string _BACKFACE_TEXTURES = "_BACKFACE_TEXTURES";
     private const string _FORWARD_PLUS = "_FORWARD_PLUS";
     private const string _WRITE_RENDERING_LAYERS = "_WRITE_RENDERING_LAYERS";
@@ -339,6 +341,11 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         int smallSteps = lowStepCount ? 0 : Mathf.Max(groupsCount, 4);
         int mediumSteps = lowStepCount ? groupsCount + 2 : smallSteps + groupsCount * 2;
 
+        // For high resolution: Use a lower accumulation factor to help reduce latency.
+        // For low resolution: Use a higher accumulation factor to improve denoising.
+        float resolutionScale = ssgiVolume.fullResolutionSS.value ? 1.0f : ssgiVolume.resolutionScaleSS.value;
+        float temporalIntensity = Mathf.Lerp(ssgiVolume.denoiseIntensitySS.value + 0.02f, ssgiVolume.denoiseIntensitySS.value - 0.04f, resolutionScale);
+
         // TODO: Expose more settings
         m_SSGIMaterial.SetFloat(_MaxSteps, ssgiVolume.maxRaySteps.value);
         m_SSGIMaterial.SetFloat(_MaxSmallSteps, smallSteps);
@@ -349,7 +356,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         m_SSGIMaterial.SetFloat(_Thickness, ssgiVolume.depthBufferThickness.value);
         m_SSGIMaterial.SetFloat(_Thickness_Increment, ssgiVolume.depthBufferThickness.value * 0.25f);
         m_SSGIMaterial.SetFloat(_RayCount, ssgiVolume.sampleCount.value);
-        m_SSGIMaterial.SetFloat(_TemporalIntensity, ssgiVolume.denoiseSS.value ? ssgiVolume.denoiseIntensitySS.value + 0.02f : 0.0f);
+        m_SSGIMaterial.SetFloat(_TemporalIntensity, temporalIntensity);
         m_SSGIMaterial.SetFloat(_ReBlurDenoiserRadius, ssgiVolume.denoiserRadiusSS.value * 2.0f * k_BlurMaxRadius); // Optimized for roughness = 1.0
         m_SSGIMaterial.SetFloat(_IndirectDiffuseLightingMultiplier, ssgiVolume.indirectDiffuseLightingMultiplier.value);
         m_SSGIMaterial.SetFloat(_MaxBrightness, 7.0f);
@@ -373,12 +380,19 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         m_SSGIPass.enableRenderingLayers = enableRenderingLayers;
         m_SSGIPass.overrideAmbientLighting = m_OverrideAmbientLighting;
 
+        bool skyFallback = ssgiVolume.IsFallbackSky();
+        if (skyFallback) { m_SSGIMaterial.EnableKeyword(_RAYMARCHING_FALLBACK_SKY); }
+        else { m_SSGIMaterial.DisableKeyword(_RAYMARCHING_FALLBACK_SKY); }
+
+        bool reflectionProbesFallback = ssgiVolume.IsFallbackReflectionProbes();
+        if (reflectionProbesFallback) { m_SSGIMaterial.EnableKeyword(_RAYMARCHING_FALLBACK_REFLECTION_PROBES); }
+        else { m_SSGIMaterial.DisableKeyword(_RAYMARCHING_FALLBACK_REFLECTION_PROBES); }
+
         bool isForwardPlus = Shader.IsKeywordEnabled(_FORWARD_PLUS);
         bool reflectionProbesFallBack = ssgiVolume.rayMiss.value == ScreenSpaceGlobalIlluminationVolume.RayMarchingFallbackHierarchy.ReflectionProbes;
-        if (isForwardPlus && reflectionProbesFallBack) { m_SSGIMaterial.EnableKeyword(_FP_REFL_PROBE_ATLAS); }
+        if (isForwardPlus && (reflectionProbesFallBack || skyFallback)) { m_SSGIMaterial.EnableKeyword(_FP_REFL_PROBE_ATLAS); }
         else { m_SSGIMaterial.DisableKeyword(_FP_REFL_PROBE_ATLAS); }
         m_SSGIPass.isForwardPlus = isForwardPlus;
-
 
         if (renderingData.cameraData.camera.cameraType == CameraType.Reflection) { m_SSGIMaterial.SetFloat(_IsProbeCamera, 1.0f); }
         else { m_SSGIMaterial.SetFloat(_IsProbeCamera, 0.0f); }
@@ -1165,9 +1179,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
         private void UpdateReflectionProbe(NativeArray<VisibleReflectionProbe> visibleReflectionProbes, Vector3 cameraPosition)
         {
-            bool reflectionProbesFallback = ssgiVolume.rayMiss.value == ScreenSpaceGlobalIlluminationVolume.RayMarchingFallbackHierarchy.ReflectionProbes;
-
-            if (reflectionProbesFallback && !Shader.IsKeywordEnabled(_FORWARD_PLUS))
+            if (ssgiVolume.IsFallbackReflectionProbes() && !Shader.IsKeywordEnabled(_FORWARD_PLUS))
             {
                 var reflectionProbe = GetClosestProbe(visibleReflectionProbes, cameraPosition);
                 if (reflectionProbe != null)

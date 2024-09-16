@@ -138,8 +138,8 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
     /// <summary>
     /// Controls the fallback hierarchy for indirect diffuse in case the ray misses.
     /// </summary>
-    [AdditionalProperty, Tooltip("Controls the fallback hierarchy for indirect diffuse in case the ray misses.")]
-    public RayMarchingFallbackHierarchyParameter rayMiss = new RayMarchingFallbackHierarchyParameter(RayMarchingFallbackHierarchy.ReflectionProbes);
+    [Tooltip("Controls the fallback hierarchy for indirect diffuse in case the ray misses.")]
+    public RayMarchingFallbackHierarchyParameter rayMiss = new RayMarchingFallbackHierarchyParameter(RayMarchingFallbackHierarchy.ReflectionProbesAndSky);
 
     /// <summary>
     /// Controls the indirect diffuse lighting from screen space global illumination.
@@ -151,7 +151,7 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
     /// <summary>
     /// Controls which rendering layer will be affected by screen space global illumination.
     /// </summary>
-    [Header("Experimental"), AdditionalProperty, InspectorName("Indirect Diffuse Rendering Layers"), Tooltip("Controls which rendering layer will be affected by screen space global illumination.")]
+    [AdditionalProperty, InspectorName("Indirect Diffuse Rendering Layers"), Tooltip("Controls which rendering layer will be affected by screen space global illumination.")]
     public RenderingLayerEnumParameter indirectDiffuseRenderingLayers = new RenderingLayerEnumParameter(0xFFFF);
 #endif
 
@@ -260,13 +260,25 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
         /// When selected, ray marching will return a black color.
         /// </summary>
         [InspectorName("Nothing"), Tooltip("When selected, ray marching will return a black color.")]
-        None = 0,
+        None = 0x00,
+
+        /// <summary>
+        /// When selected, ray marching will fall back on the sky.
+        /// </summary>
+        [InspectorName("Sky"), Tooltip("When selected, ray marching will fall back on the sky.")]
+        Sky = 0x01,
 
         /// <summary>
         /// When selected, ray marching will fall back on reflection probes (if any).
         /// </summary>
         [InspectorName("Reflection Probes"), Tooltip("When selected, ray marching will fall back on reflection probes (if any).")]
-        ReflectionProbes = 1
+        ReflectionProbes = 0x02,
+
+        /// <summary>
+        /// When selected, ray marching will fall back on reflection probes (if any) then on the sky.
+        /// </summary>
+        [InspectorName("Reflection Probes and Sky"), Tooltip("When selected, ray marching will fall back on reflection probes (if any) then on the sky.")]
+        ReflectionProbesAndSky = 0x03
     }
 
     /// <summary>
@@ -282,6 +294,22 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
         /// <param name="value">The initial value to store in the parameter.</param>
         /// <param name="overrideState">The initial override state for the parameter.</param>
         public RayMarchingFallbackHierarchyParameter(RayMarchingFallbackHierarchy value, bool overrideState = false) : base(value, overrideState) { }
+    }
+
+    /// <summary>
+    /// Determines if the current fallback hierarchy includes the sky.
+    /// </summary>
+    public bool IsFallbackSky()
+    {
+        return (rayMiss.value & RayMarchingFallbackHierarchy.Sky) != 0;
+    }
+
+    /// <summary>
+    /// Determines if the current fallback hierarchy includes reflection probes.
+    /// </summary>
+    public bool IsFallbackReflectionProbes()
+    {
+        return (rayMiss.value & RayMarchingFallbackHierarchy.ReflectionProbes) != 0;
     }
 
 #if UNITY_2023_1_OR_NEWER

@@ -31,7 +31,6 @@ void SSGIEvaluateAdaptiveProbeVolume(in float3 posWS, in float3 normalWS, in flo
 
 #include "./SSGIConfig.hlsl"
 #include "./SSGIInput.hlsl"
-#include "./SSGIFallback.hlsl" // Reflection Probes Sampling
 
 void UpdateAmbientSH()
 {
@@ -95,6 +94,8 @@ half3 SSGIEvaluateAmbientProbeSRGB(half3 normalWS)
 #ifndef kDieletricSpec
 #define kDieletricSpec half4(0.04, 0.04, 0.04, 1.0 - 0.04) // standard dielectric reflectivity coef at incident angle (= 4%)
 #endif
+
+#include "./SSGIFallback.hlsl" // Reflection Probes Sampling
 
 // position  : world space ray origin
 // direction : world space ray direction

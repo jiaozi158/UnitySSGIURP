@@ -118,6 +118,12 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
             #pragma multi_compile_local_fragment _ _FP_REFL_PROBE_ATLAS
             #pragma multi_compile_local_fragment _ _BACKFACE_TEXTURES
+            #pragma multi_compile_local_fragment _ _RAYMARCHING_FALLBACK_SKY
+            #pragma multi_compile_local_fragment _ _RAYMARCHING_FALLBACK_REFLECTION_PROBES
+
+        #if UNITY_VERSION >= 202310
+            #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+        #endif
 
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
 
@@ -189,9 +195,9 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				{
 					MAX_STEP = 8;
 					MAX_SMALL_STEP = 0;
-					MAX_MEDIUM_STEP = 3;
+					MAX_MEDIUM_STEP = 4;
 					STEP_SIZE = 0.6;
-					MEDIUM_STEP_SIZE = 0.1;
+					MEDIUM_STEP_SIZE = 0.075;
 					RAY_COUNT = max(4, RAY_COUNT);
 				}
 
@@ -395,7 +401,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 				// This reduces repetitive artifacts of A-Trous filtering.
 
 				// Reduce blur intensity if the hit distance is small
-				half blurAmount = hitDistance < 1.0 ? 0.05 : 1.0;
+				half blurAmount = hitDistance < 1.0 && _HistoryTextureValid ? 0.05 : 1.0;
 				
 				half minRange = max(2.0 * _DownSample, 2.0);
 				half maxRange = max(5.0 * _DownSample, minRange + 4.0);
@@ -547,7 +553,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 					
 				half intensity = saturate(min(_TemporalIntensity - (abs(velocity.x)) * _TemporalIntensity, _TemporalIntensity - (abs(velocity.y)) * _TemporalIntensity));
 
-				half3 finalColor = lerp(colorCenter, prevColor, intensity);
+				half3 finalColor = lerp(colorCenter, prevColor, intensity * _HistoryTextureValid);
 
 				return half4(finalColor, indirectDiffuse.w);
 			}
@@ -1021,6 +1027,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
 					// Fetch the full resolution depth
 					float4 tapSignal = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, uv, 0);
+					w = Luminance(tapSignal.xyz) > 0.0 ? w : 0.0;
 					tapSignal = w ? tapSignal : 0.0;
 
 					// Accumulate

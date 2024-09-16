@@ -65,7 +65,7 @@ class ExampleComponentEditor : VolumeComponentEditor
     const string k_ProbeAtlasUnavailableMessage = "The current rendering path is not \"Forward+\", which may affect the accuracy of \"Ray Miss\" in large complex scenes.";
     const string k_RenderingLayerDisabledMessage = "The \"Use Rendering Layers\" is disabled in the current URP asset.";
     const string k_RenderingLayerHelpMessage = "To enable \"Rendering Layers\", make sure the \"Use Rendering Layers\" is checked in the \"Decal\" renderer feature.";
-    const string k_RenderingLayerNotSupportedMessage = "Rendering Layers are not supported on OpenGL backends.";
+    const string k_RenderingLayerNotSupportedMessage = "Note: Rendering Layers are not supported on OpenGL backends.";
 
     const string k_PlayerSettingsPath = "Project/Player";
     const string k_FixButtonName = "Fix";

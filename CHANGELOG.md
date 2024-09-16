@@ -5,6 +5,20 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2024-09-16
+
+### Added
+
+- Added new fallback options and support for Adaptive Probe Volumes (APV):
+  - **Sky**: Falls back to the sky ambient probe or APV.
+  - **Reflection Probes and Sky**: Falls back to reflection probes (if any), then to the sky ambient probe or APV.
+
+### Changed
+
+- Changed the default value of ray miss property from **Reflection Probes** to **Reflection Probes and Sky**.
+- Improved the quality of SSGI across different resolution scales.
+
+
 ## [1.0.10] - 2024-09-05
 
 ### Fixed
