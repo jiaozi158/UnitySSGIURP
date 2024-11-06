@@ -26,4 +26,8 @@
 
 #define CLAMP_MAX       65472.0 // HALF_MAX minus one (2 - 2^-9) * 2^15
 
+// It seems that some developers use shader graph to create the skybox, but cannot disable depth write due to Unity (shader graph) issue
+// For better compatibility with different skybox shaders, we add a depth comparision threshold
+#define RAW_FAR_CLIP_THRESHOLD 1e-7
+
 #endif

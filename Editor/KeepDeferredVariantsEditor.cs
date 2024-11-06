@@ -9,7 +9,6 @@ using UnityEditor.Build.Reporting;
 
 class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuildWithReport
 {
-    // TODO: Only keeping variants if screen space global illumination
     public KeepDeferredVariantsEditor() { }
 
     // Use callbackOrder to set when Unity calls this shader preprocessor. Unity starts with the preprocessor that has the lowest callbackOrder value.
@@ -23,38 +22,51 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
 
     const string k_RendererDataList = "m_RendererDataList";
     const string k_SsgiRendererFeature = "ScreenSpaceGlobalIlluminationURP";
+    const string k_TemporaryRendererName = "SSGI-EmptyDeferredRenderer";
 
     bool isTemporaryRendererAdded = false;
 
     public void OnPreprocessBuild(BuildReport report)
     {
+        var urpAsset = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+        if (urpAsset == null)
+            return;
+
         var ssgi = GetRendererFeature(k_SsgiRendererFeature) as ScreenSpaceGlobalIlluminationURP;
         if (ssgi != null)
         {
-            // Create a new temporary Deferred Renderer to keep the deferred GBuffer passes in Forward rendering path
-            var rendererData = ScriptableObject.CreateInstance<UniversalRendererData>();
-            rendererData.renderingMode = RenderingMode.Deferred;
-
-            var urpAsset = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
-            if (urpAsset == null)
-                return;
-
             FieldInfo fieldInfo = urpAsset.GetType().GetField(k_RendererDataList, BindingFlags.NonPublic | BindingFlags.Instance);
 
             // Get the current renderer list
             var oldRendererList = (ScriptableRendererData[])fieldInfo.GetValue(urpAsset);
 
-            var newRendererList = new ScriptableRendererData[oldRendererList.Length + 1];
+            bool hasDeferredRenderer = false;
             for (int i = 0; i < oldRendererList.Length; i++)
             {
-                newRendererList[i] = oldRendererList[i];
+                var renderingMode = ((UniversalRendererData)oldRendererList[i]).renderingMode;
+                hasDeferredRenderer |= renderingMode != RenderingMode.Forward && renderingMode != RenderingMode.ForwardPlus; // Deferred or Deferred+
             }
-            newRendererList[oldRendererList.Length] = rendererData;
 
-            // Assign the new renderer list to the URP Asset
-            fieldInfo.SetValue(urpAsset, newRendererList);
+            // If there's no Deferred Renderer in the renderer list
+            if (!hasDeferredRenderer)
+            {
+                // Create a new temporary Deferred Renderer to keep the deferred GBuffer passes in Forward rendering path
+                var rendererData = ScriptableObject.CreateInstance<UniversalRendererData>();
+                rendererData.renderingMode = RenderingMode.Deferred;
+                rendererData.name = k_TemporaryRendererName;
 
-            isTemporaryRendererAdded = true;
+                var newRendererList = new ScriptableRendererData[oldRendererList.Length + 1];
+                for (int i = 0; i < oldRendererList.Length; i++)
+                {
+                    newRendererList[i] = oldRendererList[i];
+                }
+                newRendererList[oldRendererList.Length] = rendererData;
+
+                // Assign the new renderer list to the URP Asset
+                fieldInfo.SetValue(urpAsset, newRendererList);
+            }
+
+            isTemporaryRendererAdded = !hasDeferredRenderer;
         }
         else
             isTemporaryRendererAdded = false;

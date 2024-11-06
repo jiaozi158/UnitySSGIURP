@@ -11,7 +11,7 @@ using UnityEngine.Rendering.Universal;
 #else
 [VolumeComponentEditor(typeof(ScreenSpaceGlobalIlluminationVolume))]
 #endif
-class ExampleComponentEditor : VolumeComponentEditor
+class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
 {
     SerializedDataParameter m_Enable;
 
@@ -57,19 +57,21 @@ class ExampleComponentEditor : VolumeComponentEditor
 #endif
 
     const string k_SsgiRendererFeature = "ScreenSpaceGlobalIlluminationURP";
-    const string k_NoRendererFeatureMessage = "Screen Space Global illumination renderer feature is disabled in the active URP renderer.";
-    const string k_RendererFeatureOffMessage = "Screen Space Global illumination is disabled in the active URP renderer.";
+    const string k_NoRendererFeatureMessage = "Screen Space Global Illumination renderer feature is disabled in the active URP renderer.";
+    const string k_RendererFeatureOffMessage = "Screen Space Global Illumination is disabled in the active URP renderer.";
     const string k_HDRCubemapEncodingMessage = "HDR Cubemap Encoding Quality is not set to High in the active platform's player settings.";
     const string k_PerVertexAPVMessage = "The \"SH Evaluation Mode\" in the current URP asset is set to \"Per Vertex\". This may result in inaccurate lighting when combined with Adaptive Probe Volumes.";
     const string k_MixedAPVMessage = "The \"SH Evaluation Mode\" in the current URP asset is set to \"Mixed\". This may result in inaccurate lighting when combined with Adaptive Probe Volumes.";
-    const string k_ProbeAtlasUnavailableMessage = "The current rendering path is not \"Forward+\", which may affect the accuracy of \"Ray Miss\" in large complex scenes.";
+    const string k_ProbeAtlasUnavailableMessage = "The current rendering path is not \"Forward+\" or \"Deferred+\", which may affect the accuracy of \"Ray Miss\" in large complex scenes.";
     const string k_RenderingLayerDisabledMessage = "The \"Use Rendering Layers\" is disabled in the current URP asset.";
     const string k_RenderingLayerHelpMessage = "To enable \"Rendering Layers\", make sure the \"Use Rendering Layers\" is checked in the \"Decal\" renderer feature.";
     const string k_RenderingLayerNotSupportedMessage = "Note: Rendering Layers are not supported on OpenGL backends.";
+    const string k_RenderingDebuggerMessage = "Screen Space Global Illumination is disabled to avoid affecting rendering debugging.";
 
     const string k_PlayerSettingsPath = "Project/Player";
     const string k_FixButtonName = "Fix";
     const string k_OpenButtonName = "Open";
+    const string k_EnableButtonName = "Enable";
 
     bool isOpenGL;
     public override void OnEnable()
@@ -140,6 +142,19 @@ class ExampleComponentEditor : VolumeComponentEditor
         bool useAPV = Shader.IsKeywordEnabled(k_PROBE_VOLUMES_L1) || Shader.IsKeywordEnabled(k_PROBE_VOLUMES_L2);
         bool isVertexSH = Shader.IsKeywordEnabled(k_EVALUATE_SH_VERTEX);
         bool isMixedSH = Shader.IsKeywordEnabled(k_EVALUATE_SH_MIXED);
+        bool showDebuggerMessage = DebugManager.instance.isAnyDebugUIActive && !ssgi.RenderingDebugger;
+
+        if (ssgi.isActive && enableSSGI && showDebuggerMessage)
+        {
+            EditorGUILayout.Space();
+            CoreEditorUtils.DrawFixMeBox(k_RenderingDebuggerMessage, MessageType.Warning, k_EnableButtonName, () =>
+            {
+                ssgi.RenderingDebugger = true;
+                GUIUtility.ExitGUI();
+            });
+            EditorGUILayout.Space();
+        }
+
         if (enableSSGI && useAPV && (isVertexSH || isMixedSH))
         {
             EditorGUILayout.Space();
@@ -160,10 +175,10 @@ class ExampleComponentEditor : VolumeComponentEditor
         }
 
         bool isForwardPlus = Shader.IsKeywordEnabled(k_FORWARD_PLUS);
-        if (!isForwardPlus)
+        if (!isForwardPlus && enableSSGI)
         {
             EditorGUILayout.Space();
-            EditorGUILayout.HelpBox(k_ProbeAtlasUnavailableMessage, MessageType.Warning, wide: true);
+            EditorGUILayout.HelpBox(k_ProbeAtlasUnavailableMessage, MessageType.Info, wide: true);
             EditorGUILayout.Space();
         }
 

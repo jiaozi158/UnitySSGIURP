@@ -35,7 +35,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     [Tooltip("Specifies if screen space global illumination overrides ambient lighting. \nThis ensures the accuracy of indirect lighting from SSGI.")]
     [SerializeField] private bool m_OverrideAmbientLighting = true;
 
-    [Header("Extension")]
+    [Header("Advanced")]
     [Tooltip("Renders back-face lighting when using automatic thickness mode. \nThis improves accuracy in some cases, but may severely impact performance.")]
     [SerializeField] private bool m_BackfaceLighting = false;
 
@@ -175,6 +175,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private const string _SSGISampleTexture = "_SSGISampleTexture";
     private const string _SSGIHistorySampleTexture = "_SSGIHistorySampleTexture";
     private const string _SSGIHistoryCameraColorTexture = "_SSGIHistoryCameraColorTexture";
+    private const string _APVLightingTexture = "_APVLightingTexture";
 
     private static readonly int cameraDepthTexture = Shader.PropertyToID(_CameraDepthTexture);
     private static readonly int indirectDiffuseTexture = Shader.PropertyToID(_IndirectDiffuseTexture);
@@ -187,6 +188,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private static readonly int ssgiSampleTexture = Shader.PropertyToID(_SSGISampleTexture);
     private static readonly int ssgiHistorySampleTexture = Shader.PropertyToID(_SSGIHistorySampleTexture);
     private static readonly int ssgiHistoryCameraColorTexture = Shader.PropertyToID(_SSGIHistoryCameraColorTexture);
+    private static readonly int apvLightingTexture = Shader.PropertyToID(_APVLightingTexture);
 
     private const string _GBuffer0 = "_GBuffer0";
     private const string _GBuffer1 = "_GBuffer1";
@@ -227,6 +229,9 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     private const string _WRITE_RENDERING_LAYERS = "_WRITE_RENDERING_LAYERS";
     private const string _USE_RENDERING_LAYERS = "_USE_RENDERING_LAYERS";
     private const string _DEPTH_NORMALS_UPSCALE = "_DEPTH_NORMALS_UPSCALE";
+    private const string PROBE_VOLUMES_L1 = "PROBE_VOLUMES_L1";
+    private const string PROBE_VOLUMES_L2 = "PROBE_VOLUMES_L2";
+    private const string _APV_LIGHTING_BUFFER = "_APV_LIGHTING_BUFFER";
 
     // Global Keywords
     private const string SSGI_RENDER_GBUFFER = "SSGI_RENDER_GBUFFER";
@@ -268,7 +273,11 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         if (m_SSGIPass == null)
         {
             m_SSGIPass = new ScreenSpaceGlobalIlluminationPass(m_SSGIMaterial);
-            m_SSGIPass.renderPassEvent = RenderPassEvent.BeforeRenderingTransparents;
+        #if UNITY_6000_0_OR_NEWER
+            m_SSGIPass.renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
+        #else
+            m_SSGIPass.renderPassEvent = RenderPassEvent.BeforeRenderingTransparents; // We cannot move to after skybox because of the motion vectors issue
+        #endif
         }
         m_SSGIPass.m_SSGIMaterial = m_SSGIMaterial;
 
@@ -304,7 +313,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         if (m_ForwardGBufferPass != null)
             m_ForwardGBufferPass.Dispose();
 
-        CoreUtils.Destroy(m_SSGIMaterial);
+        if (m_SSGIMaterial != null)
+            CoreUtils.Destroy(m_SSGIMaterial);
     }
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
@@ -384,18 +394,27 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         if (skyFallback) { m_SSGIMaterial.EnableKeyword(_RAYMARCHING_FALLBACK_SKY); }
         else { m_SSGIMaterial.DisableKeyword(_RAYMARCHING_FALLBACK_SKY); }
 
+    #if UNITY_2023_1_OR_NEWER
+        bool outputAPVLighting = m_OverrideAmbientLighting && skyFallback && (Shader.IsKeywordEnabled(PROBE_VOLUMES_L1) || Shader.IsKeywordEnabled(PROBE_VOLUMES_L2));
+        if (outputAPVLighting) { m_SSGIMaterial.EnableKeyword(_APV_LIGHTING_BUFFER); }
+        else { m_SSGIMaterial.DisableKeyword(_APV_LIGHTING_BUFFER); }
+        m_SSGIPass.outputAPVLighting = outputAPVLighting;
+    #else
+        // APV is not supported on URP 14
+        m_SSGIPass.outputAPVLighting = false;
+        m_SSGIMaterial.DisableKeyword(_APV_LIGHTING_BUFFER);
+    #endif
         bool reflectionProbesFallback = ssgiVolume.IsFallbackReflectionProbes();
-        if (reflectionProbesFallback) { m_SSGIMaterial.EnableKeyword(_RAYMARCHING_FALLBACK_REFLECTION_PROBES); }
+        if (reflectionProbesFallback){ m_SSGIMaterial.EnableKeyword(_RAYMARCHING_FALLBACK_REFLECTION_PROBES); }
         else { m_SSGIMaterial.DisableKeyword(_RAYMARCHING_FALLBACK_REFLECTION_PROBES); }
 
         bool isForwardPlus = Shader.IsKeywordEnabled(_FORWARD_PLUS);
-        bool reflectionProbesFallBack = ssgiVolume.rayMiss.value == ScreenSpaceGlobalIlluminationVolume.RayMarchingFallbackHierarchy.ReflectionProbes;
-        if (isForwardPlus && (reflectionProbesFallBack || skyFallback)) { m_SSGIMaterial.EnableKeyword(_FP_REFL_PROBE_ATLAS); }
+        if (isForwardPlus && reflectionProbesFallback) { m_SSGIMaterial.EnableKeyword(_FP_REFL_PROBE_ATLAS); } // TODO: change to URP's keyword
         else { m_SSGIMaterial.DisableKeyword(_FP_REFL_PROBE_ATLAS); }
         m_SSGIPass.isForwardPlus = isForwardPlus;
 
-        if (renderingData.cameraData.camera.cameraType == CameraType.Reflection) { m_SSGIMaterial.SetFloat(_IsProbeCamera, 1.0f); }
-        else { m_SSGIMaterial.SetFloat(_IsProbeCamera, 0.0f); }
+        bool isReflectionProbe = renderingData.cameraData.camera.cameraType == CameraType.Reflection;
+        m_SSGIMaterial.SetFloat(_IsProbeCamera, isReflectionProbe ? 1.0f : 0.0f);
 
         if (m_HighQualityUpscaling)
             m_SSGIMaterial.EnableKeyword(_DEPTH_NORMALS_UPSCALE);
@@ -603,12 +622,13 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
     public class ScreenSpaceGlobalIlluminationPass : ScriptableRenderPass
     {
         private const string m_ProfilerTag = "Screen Space Global Illumination";
-        private ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
+        private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
 
         public ScreenSpaceGlobalIlluminationVolume ssgiVolume;
         public bool enableRenderingLayers;
         public bool overrideAmbientLighting;
         public bool isForwardPlus;
+        public bool outputAPVLighting;
         public Material m_SSGIMaterial;
 
         private RTHandle m_IntermediateCameraColorHandle;
@@ -618,8 +638,8 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
         private RTHandle m_HistoryDepthHandle;
         private RTHandle m_AccumulateSampleHandle;
         private RTHandle m_AccumulateHistorySampleHandle;
-
         private RTHandle m_HistoryCameraColorHandle;
+        private RTHandle m_APVLightingHandle;
 
         private readonly RenderTargetIdentifier[] rTHandles = new RenderTargetIdentifier[2];
 
@@ -656,7 +676,20 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             {
                 // Copy Direct Lighting
                 if (overrideAmbientLighting)
-                    Blitter.BlitCameraTexture(cmd, colorHandle, m_IntermediateCameraColorHandle, m_SSGIMaterial, pass: 0);
+                {
+                    if (outputAPVLighting)
+                    {
+                        rTHandles[0] = m_IntermediateCameraColorHandle;
+                        rTHandles[1] = m_APVLightingHandle;
+                        // RT-1: direct lighting
+                        // RT-2: indirect lighting (APV)
+                        cmd.SetRenderTarget(rTHandles, m_IntermediateCameraColorHandle);
+                        Blitter.BlitTexture(cmd, colorHandle, m_ScaleBias, m_SSGIMaterial, pass: 0);
+                        m_SSGIMaterial.SetTexture(apvLightingTexture, m_APVLightingHandle);
+                    }
+                    else
+                        Blitter.BlitCameraTexture(cmd, colorHandle, m_IntermediateCameraColorHandle, m_SSGIMaterial, pass: 0);
+                }
                 else
                     Blitter.BlitCameraTexture(cmd, colorHandle, m_IntermediateCameraColorHandle);
 
@@ -816,6 +849,12 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             RenderingUtils.ReAllocateIfNeeded(ref m_IntermediateCameraColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: _IntermediateCameraColorTexture);
         #endif
 
+        #if UNITY_6000_0_OR_NEWER
+            RenderingUtils.ReAllocateHandleIfNeeded(ref m_APVLightingHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: _APVLightingTexture);
+        #else
+            RenderingUtils.ReAllocateIfNeeded(ref m_APVLightingHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: _APVLightingTexture);
+        #endif
+
             desc.width = Mathf.FloorToInt(desc.width * resolutionScale);
             desc.height = Mathf.FloorToInt(desc.height * resolutionScale);
 
@@ -886,6 +925,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
             internal TextureHandle intermediateCameraColorHandle;
             internal TextureHandle historyCameraColorHandle;
+            internal TextureHandle apvLightingHandle;
 
             // SSGI diffuse lighting
             internal TextureHandle diffuseHandle;
@@ -897,10 +937,17 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             internal TextureHandle accumulateSampleHandle;
             internal TextureHandle accumulateHistorySampleHandle;
 
+            // GBuffers created by URP
+            internal bool localGBuffers;
+            internal TextureHandle gBuffer0Handle;
+            internal TextureHandle gBuffer1Handle;
+            internal TextureHandle gBuffer2Handle;
+
             internal bool denoise;
             internal bool secondDenoise;
             internal bool aggressiveDenoise;
             internal bool overrideAmbientLighting;
+            internal bool outputAPVLighting;
         }
 
         // This static method is used to execute the pass and passed as the RenderFunc delegate to the RenderGraph render pass
@@ -910,9 +957,36 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
 
             data.ssgiMaterial.SetTexture(cameraDepthTexture, data.cameraDepthTextureHandle);
 
+            if (data.localGBuffers)
+            {
+                data.ssgiMaterial.SetTexture(gBuffer0, data.gBuffer0Handle);
+                data.ssgiMaterial.SetTexture(gBuffer1, data.gBuffer1Handle);
+                data.ssgiMaterial.SetTexture(gBuffer2, data.gBuffer2Handle);
+            }
+            else
+            {
+                // Global gbuffer textures
+                data.ssgiMaterial.SetTexture(gBuffer0, null);
+                data.ssgiMaterial.SetTexture(gBuffer1, null);
+                data.ssgiMaterial.SetTexture(gBuffer2, null);
+            }
+
             // Copy Direct Lighting
             if (data.overrideAmbientLighting)
-                Blitter.BlitCameraTexture(cmd, data.cameraColorTargetHandle, data.intermediateCameraColorHandle, data.ssgiMaterial, pass: 0);
+            {
+                if (data.outputAPVLighting)
+                {
+                    data.rTHandles[0] = data.intermediateCameraColorHandle;
+                    data.rTHandles[1] = data.apvLightingHandle;
+                    // RT-1: direct lighting
+                    // RT-2: indirect lighting (APV)
+                    cmd.SetRenderTarget(data.rTHandles, data.intermediateCameraColorHandle);
+                    Blitter.BlitTexture(cmd, data.cameraColorTargetHandle, m_ScaleBias, data.ssgiMaterial, pass: 0);
+                    data.ssgiMaterial.SetTexture(apvLightingTexture, data.apvLightingHandle);
+                }
+                else
+                    Blitter.BlitCameraTexture(cmd, data.cameraColorTargetHandle, data.intermediateCameraColorHandle, data.ssgiMaterial, pass: 0);
+            }
             else
                 Blitter.BlitCameraTexture(cmd, data.cameraColorTargetHandle, data.intermediateCameraColorHandle);
 
@@ -1034,6 +1108,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 passData.secondDenoise = ssgiVolume.secondDenoiserPassSS.value;
                 passData.aggressiveDenoise = ssgiVolume.denoiserAlgorithmSS.value == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive;
                 passData.overrideAmbientLighting = overrideAmbientLighting;
+                passData.outputAPVLighting = outputAPVLighting;
 
                 if (camera.cameraType != CameraType.Reflection)
                 {
@@ -1075,6 +1150,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 desc.msaaSamples = 1;
 
                 TextureHandle intermediateCameraColorHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, name: _IntermediateCameraColorTexture, false, FilterMode.Point, TextureWrapMode.Clamp);
+                TextureHandle apvLightingHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, name: _APVLightingTexture, false, FilterMode.Point, TextureWrapMode.Clamp);
                 RenderTextureDescriptor depthDesc = desc;
 
                 desc.width = Mathf.FloorToInt(desc.width * resolutionScale);
@@ -1138,6 +1214,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 passData.accumulateSampleHandle = accumulateSampleHandle;
                 passData.accumulateHistorySampleHandle = accumulateHistorySampleHandle;
                 passData.intermediateCameraColorHandle = intermediateCameraColorHandle;
+                passData.apvLightingHandle = apvLightingHandle;
                 passData.rTHandles = rTHandles;
 
                 // UnsafePasses don't setup the outputs using UseTextureFragment/UseTextureFragmentDepth, you should specify your writes with UseTexture instead
@@ -1147,8 +1224,22 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 builder.UseTexture(passData.historyDiffuseHandle, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.intermediateDiffuseHandle, AccessFlags.Write);
                 builder.UseTexture(passData.intermediateCameraColorHandle, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.apvLightingHandle, AccessFlags.Write);
                 builder.UseTexture(resourceData.motionVectorColor, AccessFlags.Read);
                 //if (enableRenderingLayers) { builder.UseTexture(resourceData.renderingLayersTexture, AccessFlags.Read); }
+
+                passData.localGBuffers = resourceData.gBuffer[0].IsValid();
+
+                if (passData.localGBuffers)
+                {
+                    passData.gBuffer0Handle = resourceData.gBuffer[0];
+                    passData.gBuffer1Handle = resourceData.gBuffer[1];
+                    passData.gBuffer2Handle = resourceData.gBuffer[2];
+
+                    builder.UseTexture(passData.gBuffer0Handle, AccessFlags.Read);
+                    builder.UseTexture(passData.gBuffer1Handle, AccessFlags.Read);
+                    builder.UseTexture(passData.gBuffer2Handle, AccessFlags.Read);
+                }
 
                 // Assign the ExecutePass function to the render pass delegate, which will be called by the render graph when executing the pass
                 builder.SetRenderFunc((PassData data, UnsafeGraphContext context) => ExecutePass(data, context));
@@ -1168,6 +1259,7 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
             m_AccumulateSampleHandle?.Release();
             m_AccumulateHistorySampleHandle?.Release();
             m_HistoryCameraColorHandle?.Release();
+            m_APVLightingHandle?.Release();
         }
 
         Vector4 EvaluateRotator(float rand)
@@ -1397,16 +1489,37 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
                 UniversalLightData lightData = frameData.Get<UniversalLightData>();
 
-                var depthDesc = cameraData.cameraTargetDescriptor;
-                depthDesc.msaaSamples = 1;
-                depthDesc.graphicsFormat = GraphicsFormat.None;
-                if (resourceData.activeDepthTexture.IsValid())
-                    depthDesc.depthBufferBits = (int)resourceData.activeDepthTexture.GetDescriptor(renderGraph).depthBufferBits;
+                //var depthDesc = cameraData.cameraTargetDescriptor;
+                //depthDesc.msaaSamples = 1;
+                //depthDesc.graphicsFormat = GraphicsFormat.None;
+
+                TextureDesc depthDesc;
+                if (!resourceData.isActiveTargetBackBuffer)
+                {
+                    depthDesc = resourceData.activeDepthTexture.GetDescriptor(renderGraph);
+                }
+                else
+                {
+                    depthDesc = resourceData.cameraDepthTexture.GetDescriptor(renderGraph);
+                    var backBufferInfo = renderGraph.GetRenderTargetInfo(resourceData.backBufferDepth);
+                    depthDesc.colorFormat = backBufferInfo.format;
+                }
+                depthDesc.name = _CameraBackDepthTexture;
+                depthDesc.useMipMap = false;
+                depthDesc.clearBuffer = true;
+                depthDesc.msaaSamples = MSAASamples.None;
+                depthDesc.filterMode = FilterMode.Point;
+                depthDesc.wrapMode = TextureWrapMode.Clamp;
+
+
+                //if (resourceData.activeDepthTexture.IsValid())
+                //    depthDesc.depthBufferBits = (int)resourceData.activeDepthTexture.GetDescriptor(renderGraph).depthBufferBits;
 
                 // Render backface depth
                 if (!backfaceLighting)
                 {
-                    TextureHandle backDepthHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, depthDesc, name: _CameraBackDepthTexture, true, FilterMode.Point, TextureWrapMode.Clamp);
+                    //TextureHandle backDepthHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, depthDesc, name: _CameraBackDepthTexture, true, FilterMode.Point, TextureWrapMode.Clamp);
+                    TextureHandle backDepthHandle = renderGraph.CreateTexture(depthDesc);
 
                     RendererListDesc rendererListDesc = new RendererListDesc(new ShaderTagId(k_DepthOnly), universalRenderingData.cullResults, cameraData.camera);
                     m_DepthRenderStateBlock.depthState = new DepthState(true, CompareFunction.LessEqual);
@@ -1433,14 +1546,24 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 // Render backface depth + color
                 else
                 {
-                    TextureHandle backDepthHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, depthDesc, name: _CameraBackDepthTexture, true, FilterMode.Point, TextureWrapMode.Clamp);
+                    //TextureHandle backDepthHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, depthDesc, name: _CameraBackDepthTexture, true, FilterMode.Point, TextureWrapMode.Clamp);
+                    TextureHandle backDepthHandle = renderGraph.CreateTexture(depthDesc);
 
-                    var colorDesc = cameraData.cameraTargetDescriptor;
-                    colorDesc.msaaSamples = 1;
-                    colorDesc.depthStencilFormat = GraphicsFormat.None;
-                    colorDesc.graphicsFormat = GraphicsFormat.B10G11R11_UFloatPack32;
+                    //var colorDesc = cameraData.cameraTargetDescriptor;
+                    //colorDesc.msaaSamples = 1;
+                    //colorDesc.depthStencilFormat = GraphicsFormat.None;
+                    //colorDesc.graphicsFormat = GraphicsFormat.B10G11R11_UFloatPack32;
 
-                    TextureHandle backColorHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, colorDesc, name: _CameraBackOpaqueTexture, true, FilterMode.Point, TextureWrapMode.Clamp);
+                    var colorDesc = resourceData.cameraColor.GetDescriptor(renderGraph);
+                    colorDesc.name = _CameraBackOpaqueTexture;
+                    colorDesc.useMipMap = false;
+                    colorDesc.clearBuffer = true;
+                    colorDesc.filterMode = FilterMode.Point;
+                    colorDesc.wrapMode = TextureWrapMode.Clamp;
+                    colorDesc.colorFormat = GraphicsFormat.B10G11R11_UFloatPack32;
+
+                    //TextureHandle backColorHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, colorDesc, name: _CameraBackOpaqueTexture, true, FilterMode.Point, TextureWrapMode.Clamp);
+                    TextureHandle backColorHandle = renderGraph.CreateTexture(colorDesc);
 
                     m_LitTags[0] = new ShaderTagId(k_UniversalForward);
                     m_LitTags[1] = new ShaderTagId(k_UniversalForwardOnly);
@@ -1741,17 +1864,36 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                 // Disable depth priming if camera uses MSAA
                 bool canDepthPriming = !isOpenGL && (cameraData.renderType == CameraRenderType.Base || cameraData.clearDepth) && cameraData.cameraTargetDescriptor.msaaSamples == desc.msaaSamples;
 
-                RenderTextureDescriptor depthDesc = cameraData.cameraTargetDescriptor;
-                depthDesc.msaaSamples = 1;
-                depthDesc.graphicsFormat = GraphicsFormat.None;
-                if (resourceData.activeDepthTexture.IsValid())
-                    depthDesc.depthBufferBits = (int)resourceData.activeDepthTexture.GetDescriptor(renderGraph).depthBufferBits;
+                //RenderTextureDescriptor depthDesc = cameraData.cameraTargetDescriptor;
+                //depthDesc.msaaSamples = 1;
+                //depthDesc.graphicsFormat = GraphicsFormat.None;
+                //if (resourceData.activeDepthTexture.IsValid())
+                //    depthDesc.depthBufferBits = (int)resourceData.activeDepthTexture.GetDescriptor(renderGraph).depthBufferBits;
+
+                TextureDesc depthDesc;
+                if (!resourceData.isActiveTargetBackBuffer)
+                {
+                    depthDesc = resourceData.activeDepthTexture.GetDescriptor(renderGraph);
+                }
+                else
+                {
+                    depthDesc = resourceData.cameraDepthTexture.GetDescriptor(renderGraph);
+                    var backBufferInfo = renderGraph.GetRenderTargetInfo(resourceData.backBufferDepth);
+                    depthDesc.colorFormat = backBufferInfo.format;
+                }
+                depthDesc.name = _GBufferDepth;
+                depthDesc.useMipMap = false;
+                depthDesc.clearBuffer = false;
+                depthDesc.msaaSamples = MSAASamples.None;
+                depthDesc.filterMode = FilterMode.Point;
+                depthDesc.wrapMode = TextureWrapMode.Clamp;
 
                 TextureHandle depthHandle;
                 if (canDepthPriming)
                     depthHandle = resourceData.activeDepthTexture; // Note: there was a problem that the RT format was R32 (not the depth buffer) instead of D32, but I cannot reproduce it again
                 else
-                    depthHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, depthDesc, name: _GBufferDepth, false, FilterMode.Point, TextureWrapMode.Clamp);
+                    depthHandle = renderGraph.CreateTexture(depthDesc);
+                    //depthHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, depthDesc, name: _GBufferDepth, false, FilterMode.Point, TextureWrapMode.Clamp);
 
                 // Reduce GBuffer overdraw using the depth from opaque pass. (excluding OpenGL platforms)
                 if ( canDepthPriming)

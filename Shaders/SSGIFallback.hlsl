@@ -265,10 +265,15 @@ half3 SampleReflectionProbesAtlas(half3 reflectVector, float3 positionWS, half m
     {
         UpdateAmbientSH();
     #if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
+        #if defined(_APV_LIGHTING_BUFFER)
+        irradiance += SAMPLE_TEXTURE2D_X_LOD(_APVLightingTexture, my_point_clamp_sampler, normalizedScreenSpaceUV, 0).rgb * (1.0 - totalWeight);
+        #else
         half3 viewDirectionWS = normalize(GetCameraPositionWS() - positionWS);
-        half4 probeOcclusion;
+        half4 probeOcclusion = half4(1.0, 1.0, 1.0, 1.0);
         half3 ambientLighting = SSGISampleProbeVolumePixel(positionWS, reflectVector, viewDirectionWS, normalizedScreenSpaceUV, probeOcclusion);
         irradiance += ambientLighting * probeOcclusion.rgb * (1.0 - totalWeight);
+        #endif
+        
     #else
         irradiance += SSGIEvaluateAmbientProbeSRGB(reflectVector) * (1.0 - totalWeight);
     #endif
@@ -281,60 +286,67 @@ half3 SampleReflectionProbesAtlas(half3 reflectVector, float3 positionWS, half m
 #else // (_FP_REFL_PROBE_ATLAS)
 
 // used by Forward or Deferred
-half3 SampleReflectionProbesCubemap(half3 reflectVector, float3 positionWS, half mipLevel)
+half3 SampleReflectionProbesCubemap(half3 reflectVector, float3 positionWS, half mipLevel, float2 normalizedScreenSpaceUV)
 {
     half3 color = half3(0.0, 0.0, 0.0);
 
     // Check if the reflection probes are correctly set.
     // We don't support probe blending in Forward & Deferred path yet.
-#if defined(_RAYMARCHING_FALLBACK_SKY)
-    if (!_ProbeSet)
-    {
-        UpdateAmbientSH();
-        color = SSGIEvaluateAmbientProbeSRGB(reflectVector.xyz);
-        return color;
-    }
-#else
-    if (!_ProbeSet)
-        return color;
-#endif
-
 #if defined(_RAYMARCHING_FALLBACK_REFLECTION_PROBES)
-    half3 uvw = reflectVector;
-
-    if (_SpecCube0_ProbePosition.w > 0.0) // Box Projection Probe
+    if (_ProbeSet)
     {
-        float3 factors = ((reflectVector > 0 ? _SpecCube0_BoxMax.xyz : _SpecCube0_BoxMin.xyz) - positionWS) * rcp(reflectVector);
-        float scalar = min(min(factors.x, factors.y), factors.z);
-        uvw = reflectVector * scalar + (positionWS - _SpecCube0_ProbePosition.xyz);
-    }
+        half3 uvw = reflectVector;
 
-    color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, uvw, mipLevel), _SpecCube0_HDR).rgb;
-
-    // TODO: Implement a better reflection probe blending for Forward & Deferred path
-    /*
-    UNITY_BRANCH
-    if (_ProbeWeight > 0.0) // Probe Blending Enabled
-    {
-        half3 probe2Color = half3(0.0, 0.0, 0.0);
-        UNITY_BRANCH
-        if (_SpecCube1_ProbePosition.w > 0.0) // Box Projection Probe
+        if (_SpecCube0_ProbePosition.w > 0.0) // Box Projection Probe
         {
-            float3 factors = ((reflectVector > 0 ? _SpecCube1_BoxMax.xyz : _SpecCube1_BoxMin.xyz) - positionWS) * rcp(reflectVector);
+            float3 factors = ((reflectVector > 0 ? _SpecCube0_BoxMax.xyz : _SpecCube0_BoxMin.xyz) - positionWS) * rcp(reflectVector);
             float scalar = min(min(factors.x, factors.y), factors.z);
-            float3 uvw = reflectVector * scalar + (positionWS - _SpecCube1_ProbePosition.xyz);
-            probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, uvw, mipLevel), _SpecCube1_HDR).rgb;
+            uvw = reflectVector * scalar + (positionWS - _SpecCube0_ProbePosition.xyz);
         }
-        else
+
+        color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, uvw, mipLevel), _SpecCube0_HDR).rgb;
+
+        // TODO: Implement a better reflection probe blending for Forward & Deferred path
+        /*
+        UNITY_BRANCH
+        if (_ProbeWeight > 0.0) // Probe Blending Enabled
         {
-            probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, reflectVector, mipLevel), _SpecCube1_HDR).rgb;
+            half3 probe2Color = half3(0.0, 0.0, 0.0);
+            UNITY_BRANCH
+            if (_SpecCube1_ProbePosition.w > 0.0) // Box Projection Probe
+            {
+                float3 factors = ((reflectVector > 0 ? _SpecCube1_BoxMax.xyz : _SpecCube1_BoxMin.xyz) - positionWS) * rcp(reflectVector);
+                float scalar = min(min(factors.x, factors.y), factors.z);
+                float3 uvw = reflectVector * scalar + (positionWS - _SpecCube1_ProbePosition.xyz);
+                probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, uvw, mipLevel), _SpecCube1_HDR).rgb;
+            }
+            else
+            {
+                probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, reflectVector, mipLevel), _SpecCube1_HDR).rgb;
+            }
+            // Blend the probes if necessary.
+            color = lerp(color, probe2Color, _ProbeWeight).rgb;
         }
-        // Blend the probes if necessary.
-        color = lerp(color, probe2Color, _ProbeWeight).rgb;
+        */
+        return color;
     }
-    */
 #endif
 
+#if defined(_RAYMARCHING_FALLBACK_SKY)
+    UpdateAmbientSH();
+#if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
+    #if defined(_APV_LIGHTING_BUFFER)
+    color = SAMPLE_TEXTURE2D_X_LOD(_APVLightingTexture, my_point_clamp_sampler, normalizedScreenSpaceUV, 0).rgb;
+    #else
+    half3 viewDirectionWS = normalize(GetCameraPositionWS() - positionWS);
+    half4 probeOcclusion = half4(1.0, 1.0, 1.0, 1.0);
+    half3 ambientLighting = SSGISampleProbeVolumePixel(positionWS, reflectVector, viewDirectionWS, normalizedScreenSpaceUV, probeOcclusion);
+    color = ambientLighting * probeOcclusion.rgb;
+    #endif
+#else
+    color = SSGIEvaluateAmbientProbeSRGB(reflectVector.xyz);
+#endif
+#endif
     return color;
 }
 #endif
@@ -346,7 +358,7 @@ half3 SampleReflectionProbes(half3 reflectVector, float3 positionWS, half mipLev
     #if defined(_FP_REFL_PROBE_ATLAS)
         color = ClampToFloat16Max(SampleReflectionProbesAtlas(reflectVector, positionWS, mipLevel, normalizedScreenSpaceUV));
     #else
-        color = SampleReflectionProbesCubemap(reflectVector, positionWS, mipLevel);
+        color = SampleReflectionProbesCubemap(reflectVector, positionWS, mipLevel, normalizedScreenSpaceUV);
     #endif
     
     // Limit the intensity of SSGI results accumulated in reflection probe

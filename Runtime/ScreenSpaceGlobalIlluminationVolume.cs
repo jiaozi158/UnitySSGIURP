@@ -152,13 +152,13 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
     /// Controls which rendering layer will be affected by screen space global illumination.
     /// </summary>
     [AdditionalProperty, InspectorName("Indirect Diffuse Rendering Layers"), Tooltip("Controls which rendering layer will be affected by screen space global illumination.")]
-    public RenderingLayerEnumParameter indirectDiffuseRenderingLayers = new RenderingLayerEnumParameter(0xFFFF);
+    public RenderingLayerEnumParameter indirectDiffuseRenderingLayers = new RenderingLayerEnumParameter(-1); // RenderingLayerMask.Everything
 #endif
 
     public bool IsActive()
     {
     #if UNITY_2023_1_OR_NEWER
-        return enable.value && indirectDiffuseRenderingLayers.value.value != 0; // 0 -> RenderingLayerMask.Nothing
+        return enable.value && indirectDiffuseRenderingLayers.value.value != 0; // RenderingLayerMask.Nothing
     #else
         return enable.value;
     #endif

@@ -5,6 +5,26 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2024-11-07
+
+### Added
+
+- Added a message to the volume override when the rendering debugger window is open.
+
+### Changed
+
+- Improved performance when SSGI falls back to APV.
+- Adjusted the rules for keeping deferred shader variants when building the project.
+
+### Fixed
+
+- Fixed an issue with the Deferred rendering path in Unity 6 LTS.
+- Fixed an issue with the rendering layers in volume override.
+- Fixed an issue where APV fallback is not available in Forward and Deferred rendering paths.
+- Fixed a performance issue with a shader graph skybox.
+- Fixed a rendering order issue with volumetric clouds.
+
+
 ## [1.1.0] - 2024-09-16
 
 ### Added

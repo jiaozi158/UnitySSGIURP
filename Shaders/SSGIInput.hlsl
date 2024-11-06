@@ -100,6 +100,7 @@ TEXTURE2D_X(_SSGIHistorySampleTexture);
 TEXTURE2D_X_FLOAT(_SSGIHistoryDepthTexture);
 TEXTURE2D_X(_IndirectDiffuseTexture);
 TEXTURE2D_X(_SSGIHistoryCameraColorTexture);
+TEXTURE2D_X(_APVLightingTexture);
 float4 _IndirectDiffuseTexture_TexelSize;
 
 half4 ssgi_SHAr;
