@@ -36,7 +36,7 @@ class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
 
     // Indirect Lighting Controller (SSGI only)
     SerializedDataParameter m_IndirectDiffuseLightingMultiplier;
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
     SerializedDataParameter m_IndirectDiffuseRenderingLayers;
 #endif
 
@@ -57,7 +57,7 @@ class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
 #endif
 
     const string k_SsgiRendererFeature = "ScreenSpaceGlobalIlluminationURP";
-    const string k_NoRendererFeatureMessage = "Screen Space Global Illumination renderer feature is disabled in the active URP renderer.";
+    const string k_NoRendererFeatureMessage = "Screen Space Global Illumination renderer feature is missing in the active URP renderer.";
     const string k_RendererFeatureOffMessage = "Screen Space Global Illumination is disabled in the active URP renderer.";
     const string k_HDRCubemapEncodingMessage = "HDR Cubemap Encoding Quality is not set to High in the active platform's player settings.";
     const string k_PerVertexAPVMessage = "The \"SH Evaluation Mode\" in the current URP asset is set to \"Per Vertex\". This may result in inaccurate lighting when combined with Adaptive Probe Volumes.";
@@ -73,11 +73,15 @@ class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
     const string k_OpenButtonName = "Open";
     const string k_EnableButtonName = "Enable";
 
+#if UNITY_2023_3_OR_NEWER
     bool isOpenGL;
+#endif
+
     public override void OnEnable()
     {
         var o = new PropertyFetcher<ScreenSpaceGlobalIlluminationVolume>(serializedObject);
 
+#if UNITY_2023_3_OR_NEWER
         isOpenGL = (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3) || (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore); // GLES 2 is deprecated.
 
         GraphicsDeviceType[] graphicsAPIs = PlayerSettings.GetGraphicsAPIs(EditorUserBuildSettings.activeBuildTarget);
@@ -89,6 +93,7 @@ class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
                 break;
             }
         }
+#endif
 
         RenderDataListFieldInfo = typeof(UniversalRenderPipelineAsset).GetField(k_RendererDataList, BindingFlags.Instance | BindingFlags.NonPublic);
         GetHDRCubemapEncodingQualityMethodInfo = typeof(PlayerSettings).GetMethod(k_GetHDRCubemapEncodingQualityForPlatform, BindingFlags.NonPublic | BindingFlags.Static);
@@ -112,7 +117,7 @@ class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
         m_RayMiss = Unpack(o.Find(x => x.rayMiss));
 
         m_IndirectDiffuseLightingMultiplier = Unpack(o.Find(x => x.indirectDiffuseLightingMultiplier));
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
         m_IndirectDiffuseRenderingLayers = Unpack(o.Find(x => x.indirectDiffuseRenderingLayers));
 #endif
         base.OnEnable();
@@ -249,7 +254,7 @@ class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
         PropertyField(m_RayMiss);
         PropertyField(m_IndirectDiffuseLightingMultiplier);
 
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
         if (m_IndirectDiffuseRenderingLayers.overrideState.boolValue && m_IndirectDiffuseRenderingLayers.value.intValue != -1)
         {
             bool enableRenderingLayers = Shader.IsKeywordEnabled(k_LIGHT_LAYERS);

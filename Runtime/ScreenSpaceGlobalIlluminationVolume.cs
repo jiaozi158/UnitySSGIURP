@@ -147,7 +147,7 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
     [Header("Artistic Overrides"), InspectorName("Indirect Diffuse Lighting Multiplier"), Tooltip("Controls the indirect diffuse lighting from screen space global illumination.")]
     public MinFloatParameter indirectDiffuseLightingMultiplier = new MinFloatParameter(1.0f, 0.0f);
 
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
     /// <summary>
     /// Controls which rendering layer will be affected by screen space global illumination.
     /// </summary>
@@ -157,7 +157,7 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
 
     public bool IsActive()
     {
-    #if UNITY_2023_1_OR_NEWER
+    #if UNITY_2023_3_OR_NEWER
         return enable.value && indirectDiffuseRenderingLayers.value.value != 0; // RenderingLayerMask.Nothing
     #else
         return enable.value;
@@ -312,7 +312,7 @@ public sealed class ScreenSpaceGlobalIlluminationVolume : VolumeComponent, IPost
         return (rayMiss.value & RayMarchingFallbackHierarchy.ReflectionProbes) != 0;
     }
 
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_3_OR_NEWER
     /// <summary>
     /// A <see cref="VolumeParameter"/> that holds
     /// <see cref="RenderingLayerMask"/> value.
