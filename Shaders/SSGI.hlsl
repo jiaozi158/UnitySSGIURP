@@ -130,7 +130,7 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
         }
 
         // Do not reflect sky, use reflection probe fallback.
-        bool isSky = sceneDepth == UNITY_RAW_FAR_CLIP_VALUE ? true : false;
+        bool isSky = abs(deviceDepth - UNITY_RAW_FAR_CLIP_VALUE) < RAW_FAR_CLIP_THRESHOLD;
 
         // [No minimum step limit] The current implementation focuses on performance, so the ray will stop marching once it hits something.
         // Rules of ray hit:

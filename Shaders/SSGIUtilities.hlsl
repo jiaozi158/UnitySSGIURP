@@ -9,14 +9,23 @@
 #if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
 #include "Packages/com.unity.render-pipelines.core/Runtime/Lighting/ProbeVolume/ProbeVolume.hlsl"
 
-void SSGIEvaluateAdaptiveProbeVolume(in float3 posWS, in float3 normalWS, in float3 viewDir, in float2 positionSS, in uint renderingLayer,
-    out float3 bakeDiffuseLighting, out float4 probeOcclusion)
+void SSGIEvaluateAdaptiveProbeVolume(in float3 posWS, in half3 normalWS, in half3 viewDir, in float2 positionSS, in uint renderingLayer,
+    out half3 bakeDiffuseLighting, out half4 probeOcclusion)
 {
-    bakeDiffuseLighting = float3(0.0, 0.0, 0.0);
+    bakeDiffuseLighting = half3(0.0, 0.0, 0.0);
 
+#if UNITY_VERSION >= 202330
     posWS = AddNoiseToSamplingPosition(posWS, positionSS, viewDir);
+#else
+    posWS = AddNoiseToSamplingPosition(posWS, positionSS);
+#endif
 
+#if UNITY_VERSION >= 600000
     APVSample apvSample = SampleAPV(posWS, normalWS, renderingLayer, viewDir);
+#else
+    APVSample apvSample = SampleAPV(posWS, normalWS, viewDir);
+#endif
+    
 #ifdef USE_APV_PROBE_OCCLUSION
     probeOcclusion = apvSample.probeOcclusion;
 #else
