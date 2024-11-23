@@ -4,6 +4,34 @@
 #include "./SSGIUtilities.hlsl"
 #include "./SSGIDenoise.hlsl"
 
+#ifdef UNITY_COLORSPACE_GAMMA
+#define unity_ColorSpaceDielectricSpec half4(0.220916301, 0.220916301, 0.220916301, 1.0 - 0.220916301)
+#else // Linear values
+#define unity_ColorSpaceDielectricSpec half4(0.04, 0.04, 0.04, 1.0 - 0.04) // standard dielectric reflectivity coef at incident angle (= 4%)
+#endif
+
+float3 DepthToWorldPositionV1(float2 screenPos)
+{
+    //screenPos / screenPos.w就是【0,1】的归一化屏幕坐标  //_CameraDepthTexture是获取的深度图
+    //Linear01Depth将采样的非线性深度图变成线性的
+    float depth = Linear01Depth(SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenPos, 0).r, _ZBufferParams);
+    //将【0，1】映射到【-1， 1】上，得到ndcPos的x，y坐标
+    float2 ndcPosXY = screenPos * 2 - 1;
+    //float3的z值补了一个1，代表远平面的NDC坐标  _ProjectionParams代表view空间的远平面, 我们知道裁剪空间的w和view空间的z相等，
+    //相当于做了一次逆向透视除法，得到了远平面的clipPos
+    float3 clipPos = float3(ndcPosXY.x, ndcPosXY.y, 1) * _ProjectionParams.z;
+
+    float3 viewPos = mul(unity_CameraInvProjection, clipPos.xyzz).xyz * depth;  //远平面的clipPos转回远平面的viewPos， 再利用depth获取该点在viewPos里真正的位置
+    //补一个1变成其次坐标，然后逆的V矩阵变回worldPos
+    float3 worldPos = mul(UNITY_MATRIX_I_V, float4(viewPos, 1)).xyz;
+    return worldPos;
+}
+
+float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness)
+{
+	return F0 + (max(float3(1.0 - roughness, 1.0 - roughness, 1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
+}
+
 // If no intersection, "rayHit.distance" will remain "REAL_EPS".
 RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
 {

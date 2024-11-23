@@ -802,9 +802,19 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
                 half4 gbuffer0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, screenUV, 0);
                 half4 gbuffer1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, my_point_clamp_sampler, screenUV, 0);
+                half4 gbuffer2 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0);
 
                 half3 albedo = gbuffer0.rgb;
                 half metallic = (gbuffer0.a == kMaterialFlagSpecularSetup) ? MetallicFromReflectivity(ReflectivitySpecular(gbuffer1.rgb)) : gbuffer1.r;
+                half roughness = 1 - gbuffer2.a;
+
+                float3 posWS_Re1 = DepthToWorldPositionV1(screenUV.xy);
+                float3 viewDir = normalize(_WorldSpaceCameraPos.xyz - posWS_Re1.xyz);
+                float ndv = max(saturate(dot(gbuffer2.rgb, viewDir)), 0.000001);
+                half3 F0 = lerp(unity_ColorSpaceDielectricSpec.rgb, albedo, metallic);
+
+                half3 Flast = FresnelSchlickRoughness(ndv, F0, roughness);
+                half3 kdLast = (1 - Flast) * (1 - metallic);
 
                 half3 indirectLighting;
 
@@ -820,7 +830,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
                 half4 directLighting = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgba;
 
-                indirectLighting *= albedo * (1.0 - metallic);
+                indirectLighting *= albedo * kdLast;
 
                 // Apply the indirect lighting multiplier
                 indirectLighting *= _IndirectDiffuseLightingMultiplier;
