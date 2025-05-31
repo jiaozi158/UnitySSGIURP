@@ -90,7 +90,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
             #if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
                 float3 positionWS = ComputeWorldSpacePosition(screenUV, depth, UNITY_MATRIX_I_VP);
-                float3 viewDirectionWS = normalize(GetCameraPositionWS() - positionWS);
+                half3 viewDirectionWS = IsPerspectiveProjection() ? normalize(GetCameraPositionWS() - positionWS) : normalize(UNITY_MATRIX_V[2].xyz);
                 half4 probeOcclusion = half4(1.0, 1.0, 1.0, 1.0);
                 apvLighting = SSGISampleProbeVolumePixel(positionWS, normalSmoothness.xyz, viewDirectionWS, screenUV, probeOcclusion);
                 apvLighting *= probeOcclusion.rgb;
@@ -99,8 +99,12 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
             #else
                 half3 ambientLighting = SSGIEvaluateAmbientProbeSRGB(normalSmoothness.xyz) * albedo * (1.0 - metallic);
             #endif
-
                 directLighting.rgb = max(directLighting.rgb - ambientLighting, half3(0.0, 0.0, 0.0));
+
+                // To prevent artifacts from precision errors, we set the direct lighting to zero when luminance is low.
+                half luminanceFactor = saturate((Luminance(directLighting.rgb)) * rcp(0.04));
+                directLighting.rgb = lerp(half3(0.0, 0.0, 0.0), directLighting.rgb, luminanceFactor);
+
                 //directLighting.rgb = ambientLighting; // debug ambient lighting
 
                 return;
@@ -145,7 +149,6 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 float2 screenUV = input.texcoord;
-
                 half4 lightingDistance = half4(0.0, 0.0, 0.0, 0.0); // indirectDiffuse.rgb + distance.a
 
                 float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screenUV, 0).r;
@@ -166,7 +169,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
                 float3 positionWS = ComputeWorldSpacePosition(screenUV, depth, UNITY_MATRIX_I_VP);
                 float3 cameraPositionWS = GetCameraPositionWS();
-                half3 viewDirectionWS = normalize(cameraPositionWS - positionWS);
+                half3 viewDirectionWS = IsPerspectiveProjection() ? normalize(cameraPositionWS - positionWS) : normalize(UNITY_MATRIX_V[2].xyz);
 
                 half2 velocity = SAMPLE_TEXTURE2D_X_LOD(_MotionVectorTexture, my_linear_clamp_sampler, screenUV, 0).xy;
                 float2 prevUV = screenUV - velocity;
@@ -402,7 +405,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
                 centerDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1, centerDepth);
             #endif
 
-                centerDepth = LinearEyeDepth(centerDepth, _ZBufferParams);
+                centerDepth = ConvertLinearEyeDepth(centerDepth);
 
                 half4 colorDistance = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgba;
                 half3 centerColor = colorDistance.rgb;
@@ -472,7 +475,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
                     depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth);
                 #endif
 
-                    depth = LinearEyeDepth(depth, _ZBufferParams);
+                    depth = ConvertLinearEyeDepth(depth);
 
                     diff.x = centerDepth - depth;
                     distance = dot(diff.x, diff.x);
@@ -652,7 +655,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
                 offsetUV.y -= _IndirectDiffuseTexture_TexelSize.y;
 
                 half3 centerNormal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyz;
-                float centerDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
+                float centerDepth = ConvertLinearEyeDepth(deviceDepth);
 
                 half3 resultColor = half3(0.0, 0.0, 0.0);
 
@@ -673,10 +676,10 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
             #endif
 
                 neighborDepth = float4(
-                    LinearEyeDepth(neighborDepth.x, _ZBufferParams),
-                    LinearEyeDepth(neighborDepth.y, _ZBufferParams),
-                    LinearEyeDepth(neighborDepth.z, _ZBufferParams),
-                    LinearEyeDepth(neighborDepth.w, _ZBufferParams));
+                    ConvertLinearEyeDepth(neighborDepth.x),
+                    ConvertLinearEyeDepth(neighborDepth.y),
+                    ConvertLinearEyeDepth(neighborDepth.z),
+                    ConvertLinearEyeDepth(neighborDepth.w));
 
                 half3 normal0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, uv0, 0).xyz;
                 half3 normal1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, uv1, 0).xyz;
@@ -945,7 +948,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
 
                 // Evaluate the position and view vectors
                 float3 cameraPositionWS = GetCameraPositionWS();
-                half3 viewDirectionWS = normalize(cameraPositionWS - positionWS);
+                half3 viewDirectionWS = IsPerspectiveProjection() ? normalize(cameraPositionWS - positionWS) : normalize(UNITY_MATRIX_V[2].xyz);
 
                 half3 centerNormal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).xyz;
 
@@ -1072,7 +1075,7 @@ Shader "Hidden/Lighting/ScreenSpaceGlobalIllumination"
             #pragma fragment frag
 
             #pragma target 3.5
-
+            
             // URP pre-defined the following variable on 2023.2+.
         #if UNITY_VERSION < 202320
             float4 _BlitTexture_TexelSize;

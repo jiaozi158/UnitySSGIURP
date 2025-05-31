@@ -153,6 +153,22 @@ float GenerateRandomValue(float2 screenUV)
     return GenerateHashedRandomFloat(uint3(screenUV * _BlitTexture_TexelSize.zw, _FrameIndex + _Seed));
 }
 
+// Supports perspective and orthographic projections
+float ConvertLinearEyeDepth(float deviceDepth)
+{
+    UNITY_BRANCH
+    if (IsPerspectiveProjection())
+        return LinearEyeDepth(deviceDepth, _ZBufferParams);
+    else
+    {
+    #if UNITY_REVERSED_Z
+        deviceDepth = 1.0 - deviceDepth;
+    #endif
+        return lerp(_ProjectionParams.y, _ProjectionParams.z, deviceDepth);
+    }
+
+}
+
 void HitSurfaceDataFromGBuffer(float2 screenUV, inout RayHit rayHit, bool isBackHit = false)
 {
 #if defined(_FOVEATED_RENDERING_NON_UNIFORM_RASTER)

@@ -15,7 +15,13 @@ half3 BoxProjectedDirection(half3 reflectVector, float3 positionWS, float3 probe
 // TODO: Remove the "_FP_REFL_PROBE_ATLAS" local keyword and use "_FORWARD_PLUS" instead
 // This is needed for SSPT (shader graph version) because of some shader variable redefinitions.
 
-// Forward+ Reflection Probe Atlas
+// Reminder:
+// In Unity 6.1, the "_FORWARD_PLUS" keyword has been deprecated. (Use the new global keyword "_REFLECTION_PROBE_ATLAS" instead)
+// The change was made because enabling reflection probe atlas is no longer mandatory in the Forward+ rendering path.
+//
+// Fortunately, we have our own keyword "_FP_REFL_PROBE_ATLAS", which is planned to rename to "_REFL_PROBE_ATLAS" in the future.
+
+// Forward+ or Deferred+ Reflection Probe Atlas
 #if defined(_FP_REFL_PROBE_ATLAS)
 
 // MAX_VISIBLE_LIGHTS is moved to URP-config package (configurable by users) starts from 2023.3.
@@ -268,7 +274,7 @@ half3 SampleReflectionProbesAtlas(half3 reflectVector, float3 positionWS, half m
         #if defined(_APV_LIGHTING_BUFFER)
         irradiance += SAMPLE_TEXTURE2D_X_LOD(_APVLightingTexture, my_point_clamp_sampler, normalizedScreenSpaceUV, 0).rgb * (1.0 - totalWeight);
         #else
-        half3 viewDirectionWS = normalize(GetCameraPositionWS() - positionWS);
+        half3 viewDirectionWS = IsPerspectiveProjection() ? normalize(GetCameraPositionWS() - positionWS) : normalize(UNITY_MATRIX_V[2].xyz);
         half4 probeOcclusion = half4(1.0, 1.0, 1.0, 1.0);
         half3 ambientLighting = SSGISampleProbeVolumePixel(positionWS, reflectVector, viewDirectionWS, normalizedScreenSpaceUV, probeOcclusion);
         irradiance += ambientLighting * probeOcclusion.rgb * (1.0 - totalWeight);
@@ -338,7 +344,7 @@ half3 SampleReflectionProbesCubemap(half3 reflectVector, float3 positionWS, half
     #if defined(_APV_LIGHTING_BUFFER)
     color = SAMPLE_TEXTURE2D_X_LOD(_APVLightingTexture, my_point_clamp_sampler, normalizedScreenSpaceUV, 0).rgb;
     #else
-    half3 viewDirectionWS = normalize(GetCameraPositionWS() - positionWS);
+    half3 viewDirectionWS = IsPerspectiveProjection() ? normalize(GetCameraPositionWS() - positionWS) : normalize(UNITY_MATRIX_V[2].xyz);
     half4 probeOcclusion = half4(1.0, 1.0, 1.0, 1.0);
     half3 ambientLighting = SSGISampleProbeVolumePixel(positionWS, reflectVector, viewDirectionWS, normalizedScreenSpaceUV, probeOcclusion);
     color = ambientLighting * probeOcclusion.rgb;

@@ -79,8 +79,8 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
 
         // Convert Z-Depth to Linear Eye Depth
         // Value Range: Camera Near Plane -> Camera Far Plane
-        float sceneDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
-        float hitDepth = LinearEyeDepth(rayPositionNDC.z, _ZBufferParams); // Non-GL (DirectX): rayPositionNDC.z is (near to far) 1..0
+        float sceneDepth = ConvertLinearEyeDepth(deviceDepth);
+        float hitDepth = ConvertLinearEyeDepth(rayPositionNDC.z); // Non-GL (DirectX): rayPositionNDC.z is (near to far) 1..0
 
         // Calculate (front) depth difference
         // Positive: ray is in front of the front-faces of object.
@@ -102,7 +102,7 @@ RayHit RayMarching(Ray ray, float2 screenUV, half dither, half3 viewDirectionWS)
         bool backDepthValid = false; 
     #if defined(_BACKFACE_TEXTURES)
         deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).r;
-        sceneBackDepth = LinearEyeDepth(deviceBackDepth, _ZBufferParams);
+        sceneBackDepth = ConvertLinearEyeDepth(deviceBackDepth);
 
         backDepthValid = (deviceBackDepth != UNITY_RAW_FAR_CLIP_VALUE) && (sceneBackDepth >= sceneDepth);
         backDepthDiff = backDepthValid ? (hitDepth - sceneBackDepth) : (depthDiff - marchingThickness);

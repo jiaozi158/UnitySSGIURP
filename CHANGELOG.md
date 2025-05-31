@@ -5,6 +5,21 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2025-05-31
+
+### Added
+
+- Added support for Deferred+ rendering path in Unity 6.1.
+- Added support for orthographic cameras.
+
+### Fixed
+
+- Fixed a flickering issue when using multiple cameras with SSGI enabled.
+- Fixed a rendering issue when MSAA is enabled.
+- Fixed a potential green artifacts issue when SSAO is enabled.
+- Fixed an issue with SSGI adding an empty deferred renderer to builds.
+
+
 ## [1.1.3] - 2024-11-23
 
 ### Fixed

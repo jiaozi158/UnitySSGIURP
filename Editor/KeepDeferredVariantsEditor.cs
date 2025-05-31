@@ -7,7 +7,10 @@ using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 
-class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuildWithReport
+/// <summary>
+/// [Editor Only] Preserve GBuffer shader variants when building Universal RP projects.
+/// </summary>
+class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuildWithReport, IProcessSceneWithReport
 {
     public KeepDeferredVariantsEditor() { }
 
@@ -25,6 +28,7 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
     const string k_TemporaryRendererName = "SSGI-EmptyDeferredRenderer";
 
     bool isTemporaryRendererAdded = false;
+    UniversalRendererData tempRendererData;
 
     public void OnPreprocessBuild(BuildReport report)
     {
@@ -51,16 +55,16 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
             if (!hasDeferredRenderer)
             {
                 // Create a new temporary Deferred Renderer to keep the deferred GBuffer passes in Forward rendering path
-                var rendererData = ScriptableObject.CreateInstance<UniversalRendererData>();
-                rendererData.renderingMode = RenderingMode.Deferred;
-                rendererData.name = k_TemporaryRendererName;
+                tempRendererData = ScriptableObject.CreateInstance<UniversalRendererData>();
+                tempRendererData.renderingMode = RenderingMode.Deferred;
+                tempRendererData.name = k_TemporaryRendererName;
 
                 var newRendererList = new ScriptableRendererData[oldRendererList.Length + 1];
                 for (int i = 0; i < oldRendererList.Length; i++)
                 {
                     newRendererList[i] = oldRendererList[i];
                 }
-                newRendererList[oldRendererList.Length] = rendererData;
+                newRendererList[oldRendererList.Length] = tempRendererData;
 
                 // Assign the new renderer list to the URP Asset
                 fieldInfo.SetValue(urpAsset, newRendererList);
@@ -86,6 +90,43 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
         OnPostprocessBuild(report);
     }
 
+    // After shader compilation
+    // Remove our temp deferred renderer before build packaging
+    public void OnProcessScene(UnityEngine.SceneManagement.Scene scene, BuildReport report)
+    {
+        if (isTemporaryRendererAdded)
+        {
+            var urpAsset = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+            if (urpAsset == null)
+                return;
+
+            FieldInfo fieldInfo = urpAsset.GetType().GetField(k_RendererDataList, BindingFlags.NonPublic | BindingFlags.Instance);
+
+            if (fieldInfo != null)
+            {
+                // Get the current renderer list
+                var oldRendererList = (ScriptableRendererData[])fieldInfo.GetValue(urpAsset);
+
+                var newRendererList = new ScriptableRendererData[oldRendererList.Length - 1];
+                int index = 0;
+                for (int i = 0; i < oldRendererList.Length - 1; i++)
+                {
+                    if (oldRendererList[i] != null)
+                    {
+                        newRendererList[index++] = oldRendererList[i];
+                    }
+                }
+
+                // Set the renderer list back to the URP Asset
+                fieldInfo.SetValue(urpAsset, newRendererList);
+            }
+
+            Object.DestroyImmediate(tempRendererData);
+            isTemporaryRendererAdded = false;
+        }
+    }
+
+    // Ensure the temp renderer is removed from build
     public void OnPostprocessBuild(BuildReport report)
     {
         if (isTemporaryRendererAdded)
@@ -115,6 +156,7 @@ class KeepDeferredVariantsEditor : IPreprocessBuildWithReport, IPostprocessBuild
                 fieldInfo.SetValue(urpAsset, newRendererList);
             }
 
+            Object.DestroyImmediate(tempRendererData);
             isTemporaryRendererAdded = false;
         }
     }

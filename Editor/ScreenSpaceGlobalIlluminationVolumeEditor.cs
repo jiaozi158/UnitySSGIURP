@@ -44,9 +44,14 @@ class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
     const string k_PROBE_VOLUMES_L2 = "PROBE_VOLUMES_L2";
     const string k_EVALUATE_SH_VERTEX = "EVALUATE_SH_VERTEX";
     const string k_EVALUATE_SH_MIXED = "EVALUATE_SH_MIXED";
-    const string k_FORWARD_PLUS = "_FORWARD_PLUS";
     const string k_LIGHT_LAYERS = "_LIGHT_LAYERS";
     const string k_WRITE_RENDERING_LAYERS = "_WRITE_RENDERING_LAYERS";
+#if UNITY_6000_1_OR_NEWER
+    const string k_CLUSTER_LIGHT_LOOP = "_CLUSTER_LIGHT_LOOP";
+    const string k_REFLECTION_PROBE_ATLAS = "_REFLECTION_PROBE_ATLAS";
+#else
+    const string k_FORWARD_PLUS = "_FORWARD_PLUS";
+#endif
 
     const string k_RendererDataList = "m_RendererDataList";
 
@@ -62,7 +67,12 @@ class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
     const string k_HDRCubemapEncodingMessage = "HDR Cubemap Encoding Quality is not set to High in the active platform's player settings.";
     const string k_PerVertexAPVMessage = "The \"SH Evaluation Mode\" in the current URP asset is set to \"Per Vertex\". This may result in inaccurate lighting when combined with Adaptive Probe Volumes.";
     const string k_MixedAPVMessage = "The \"SH Evaluation Mode\" in the current URP asset is set to \"Mixed\". This may result in inaccurate lighting when combined with Adaptive Probe Volumes.";
-    const string k_ProbeAtlasUnavailableMessage = "The current rendering path is not \"Forward+\" or \"Deferred+\", which may affect the accuracy of \"Ray Miss\" in large complex scenes.";
+#if UNITY_6000_1_OR_NEWER
+    const string k_ClusterLightingUnavailableMessage = "The current rendering path is not \"Forward+\" or \"Deferred+\", which may affect the accuracy of \"Ray Miss\" in large complex scenes.";
+#else
+    const string k_ClusterLightingUnavailableMessage = "The current rendering path is not \"Forward+\", which may affect the accuracy of \"Ray Miss\" in large complex scenes.";
+#endif
+    const string k_ProbeAtlasUnavailableMessage = "The \"Probe Atlas Blending\" is disabled in the active URP asset, which may affect the accuracy of \"Ray Miss\" in large complex scenes.";
     const string k_RenderingLayerDisabledMessage = "The \"Use Rendering Layers\" is disabled in the current URP asset.";
     const string k_RenderingLayerHelpMessage = "To enable \"Rendering Layers\", make sure the \"Use Rendering Layers\" is checked in the \"Decal\" renderer feature.";
     const string k_RenderingLayerNotSupportedMessage = "Note: Rendering Layers are not supported on OpenGL backends.";
@@ -179,12 +189,28 @@ class ScreenSpaceGlobalIlluminationVolumeEditor : VolumeComponentEditor
             EditorGUILayout.Space();
         }
 
-        bool isForwardPlus = Shader.IsKeywordEnabled(k_FORWARD_PLUS);
-        if (!isForwardPlus && enableSSGI)
+        if (enableSSGI)
         {
-            EditorGUILayout.Space();
-            EditorGUILayout.HelpBox(k_ProbeAtlasUnavailableMessage, MessageType.Info, wide: true);
-            EditorGUILayout.Space();
+#if UNITY_6000_1_OR_NEWER
+            bool isClusterLighting = Shader.IsKeywordEnabled(k_CLUSTER_LIGHT_LOOP); // Forward+ or Deferred+
+            bool supportProbeAtlas = Shader.IsKeywordEnabled(k_REFLECTION_PROBE_ATLAS);
+#else
+            bool supportProbeAtlas = Shader.IsKeywordEnabled(k_FORWARD_PLUS);
+            bool isClusterLighting = supportProbeAtlas;
+#endif
+
+            if (!isClusterLighting)
+            {
+                EditorGUILayout.Space();
+                EditorGUILayout.HelpBox(k_ClusterLightingUnavailableMessage, MessageType.Info, wide: true);
+                EditorGUILayout.Space();
+            }
+            else if (!supportProbeAtlas) // "Probe Atlas Blending" is off
+            {
+                EditorGUILayout.Space();
+                EditorGUILayout.HelpBox(k_ProbeAtlasUnavailableMessage, MessageType.Info, wide: true);
+                EditorGUILayout.Space();
+            }
         }
 
         PropertyField(m_Enable);
