@@ -729,8 +729,6 @@ public class ScreenSpaceGlobalIlluminationURP : ScriptableRendererFeature
                     cmd.SetRenderTarget(rTHandles, m_AccumulateSampleHandle);
                     Blitter.BlitTexture(cmd, m_IntermediateDiffuseHandle, m_ScaleBias, m_SSGIMaterial, pass: 2);
 
-                    // Update History sample count
-                    Blitter.BlitCameraTexture(cmd, m_AccumulateSampleHandle, m_AccumulateHistorySampleHandle);
 
                     if (ssgiVolume.denoiserAlgorithmSS.value == ScreenSpaceGlobalIlluminationVolume.DenoiserAlgorithm.Aggressive)
                     {

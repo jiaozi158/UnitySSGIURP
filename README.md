@@ -39,7 +39,7 @@ Reminders
 ------------
 - This is an initial release and some unresolved issues are expected due to lack of time for testing.
 - Please open an issue if anything went wrong.
-- Orthographic projection and VR support will be added in the future release.
+- VR support will be added in the future release.
  
 License
 ------------
